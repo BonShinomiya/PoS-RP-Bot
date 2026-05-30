@@ -1,0 +1,354 @@
+{
+    "post_trauma": {
+        "name": "Посттравма",
+        "cost": 0,
+        "description": "Война никогда не меняется. И на вас, она оставила неизгладимый след.",
+        "text_modifier": "",
+        "modifiers": [
+            [
+                "group",
+                "empathy",
+                -1
+            ],
+            [
+                "derived",
+                "mental_points",
+                -5
+            ]
+        ],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "",
+        "type": "negative",
+        "unique": "yes"
+    },
+    "old": {
+        "name": "Зрелость",
+        "cost": 0,
+        "description": "Судя по всему, какой-то очень веский довод заставил вас отправиться в ЧЗО. Ведь, чтобы оставить на БЗ своё богатство, нужно приложить немалые усилия.",
+        "text_modifier": "",
+        "modifiers": [
+            [
+                "group",
+                "reaction",
+                -1
+            ],
+            [
+                "group",
+                "dexterity",
+                -1
+            ],
+            [
+                "group",
+                "body",
+                -1
+            ]
+        ],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "",
+        "type": "negative",
+        "unique": "yes"
+    },
+    "very_old": {
+        "name": "Старость",
+        "cost": 0,
+        "description": "Что-то вы припозднились с походом в Богом забытое место. Забыли там в столь позднем возрасте вставную челюсть? Или гитару семиструнную?",
+        "text_modifier": "",
+        "modifiers": [
+            [
+                "group",
+                "reaction",
+                -1
+            ],
+            [
+                "group",
+                "intellect",
+                -1
+            ],
+            [
+                "group",
+                "dexterity",
+                -2
+            ],
+            [
+                "group",
+                "body",
+                -2
+            ]
+        ],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "",
+        "type": "negative",
+        "unique": "yes"
+    },
+    "psychologist": {
+        "name": "Психолог",
+        "cost": -1,
+        "description": "Вы — психолог, по профессии, или же по призванию.",
+        "text_modifier": "Умножает базовый шанс вывести кого-либо из состояния шока/психоза на 5. Возможность проводить терапию для лечения ПТСР у других.",
+        "modifiers": [],
+        "requirements": {
+            "empathy": 4,
+            "skill_communication": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "Успешно вывести из состояния психоза/шока 5 персонажей.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "beast_dialogue": {
+        "name": "Диалог со зверем",
+        "cost": -1,
+        "description": "Похоже Вы умеете находить общий язык не только с людьми.",
+        "text_modifier": "Умножает базовый шанс избежать боя с мутантами животного происхождения на 5, если это не вы не них напали. Возможность приручить мутанта животного происхождения с шансом, равным значению навыка Мутант",
+        "modifiers": [],
+        "requirements": {
+            "empathy": 4,
+            "skill_communication": 3,
+            "skill_mutants": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "Успешно разойтись с мутантами без боя 5 раз.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "ghost": {
+        "name": "Призрак",
+        "cost": -1,
+        "description": "Мягкая поступь, плавные движения — это про вас.",
+        "text_modifier": "В ситуациях, когда вы пытаетесь к кому-то подкрасться, или кого-то обойти, вы получаете модификатор +3 к Скрытности.",
+        "modifiers": [],
+        "requirements": {
+            "dexterity": 4,
+            "skill_stealth": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "10 раз успешно пройти проверку Скрытности в таких ситуациях.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "play_hide_n_seek": {
+        "name": "Поиграем в прятки?",
+        "cost": -1,
+        "description": "Сутки пролежать в кустах без единого движения? Это про вас.",
+        "text_modifier": "В ситуациях, когда вы пытаетесь от кого-то спрятаться, будучи недвижимым, вы получаете модификатор +5 к Скрытности.",
+        "modifiers": [],
+        "requirements": {
+            "dexterity": 4,
+            "skill_stealth": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "10 раз успешно пройти проверку Скрытности в таких ситуациях.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "dancer": {
+        "name": "Танцор",
+        "cost": -1,
+        "description": "Похоже вы не упускали возможности повеселиться в прошлом, и теперь это может спасти вам жизнь.",
+        "text_modifier": "Вы получаете модификатор навыка Манёвренность +3 при уклонении от первого удара в ближнем бою (в том числе от атаки мутантов)/подсечки/захватов в начале каждого раунда.",
+        "modifiers": [],
+        "requirements": {
+            "dexterity": 4,
+            "reaction": 4,
+            "skill_agility": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "20 раз успешно пройти проверку Манёвренности в бою.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "try_dodge": {
+        "name": "Попробуй увернись",
+        "cost": -1,
+        "description": "Похоже вы не самый заурядный боец, и другим это заметно.",
+        "text_modifier": "",
+        "modifiers": [
+            [
+                "skill",
+                "skill_closecombat",
+                3
+            ]
+        ],
+        "requirements": {
+            "dexterity": 4,
+            "reaction": 4,
+            "skill_closecombat": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "20 раз успешно пройти проверку Ближнего боя в бою.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "fighting_will": {
+        "name": "Боевая воля",
+        "cost": -2,
+        "description": "Вы прошли уже многое, и пули свистящие над головой, далеко не самое страшное что вы встретили на своём пути.",
+        "text_modifier": "Ваш персонаж теряет в два раза меньше МЗ за подавление и смерть товарища, а так же за неожиданный бой. Вы не теряете МЗ во время боя.",
+        "modifiers": [],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "20 боёв подряд без полной утраты МЗ.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "zone_will": {
+        "name": "Воля Зоны",
+        "cost": -2,
+        "description": "Ваша психика явно крепче чем у других, любой контролёр это оценит.",
+        "text_modifier": "Ваш персонаж получает вдвое меньше урона МЗ от пси-урона природного происхождения (мутанты и аномалии). Вы не теряете МЗ при нахождении посреди аномального поля.",
+        "modifiers": [],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "20 случаев подряд пси-урона от указанных источников без полной утраты МЗ.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "hunter": {
+        "name": "Профессиональный охотник",
+        "cost": -1,
+        "description": "Вашему умению и страсти к охоте можно позавидовать.",
+        "text_modifier": "Первый выстрел в бою с мутантами гарантированно критует цель.",
+        "modifiers": [],
+        "requirements": {
+            "skill_mutants": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "Убить химеру/псевдогиганта/болотную тварь/контролёра.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "staring_game": {
+        "name": "Игра в гляделки",
+        "cost": -1,
+        "description": "С вашей внимательностью даже кровососу не потягаться.",
+        "text_modifier": "Вы можете заметить кровососа даже в момент его маскировки. В бою его способность \"Маскировка\" по отношению к вам не работает.",
+        "modifiers": [],
+        "requirements": {
+            "skill_attention": 4,
+            "skill_mutants": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "Убить трёх кровососов.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "tourist": {
+        "name": "Турист",
+        "cost": -1,
+        "description": "Вы определённо знаете толк в путешествиях и длинных переходах.",
+        "text_modifier": "Во время перехода с локации на локации, вы можете убрать два случайных дебаффа, которые вам выпали во время перехода.",
+        "modifiers": [],
+        "requirements": {
+            "skill_zoneknowledge": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "Сделать 5 вылазок на локацию III тира.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "until_last_drop": {
+        "name": "До последней капли",
+        "cost": -1,
+        "description": "Похоже ваша кровь вам дороже золота.",
+        "text_modifier": "Вдвое меньше трата ПЗ за все виды кровотечений.",
+        "modifiers": [],
+        "requirements": {
+            "skill_persistence": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "20 успешно пережитых кровотечений.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "indestructible": {
+        "name": "Несокрушимый",
+        "cost": -1,
+        "description": "Похоже ваши кости крепче стали. Интересно, сколько кальция вы выпили?",
+        "text_modifier": "Нельзя получить критическое ранение \"Треснувшее ребро\". Шанс получить критические ранения \"Сломанное ребро\", \"Перелом руки\" и \"Перелом ноги\" становится меньше на 50%.",
+        "modifiers": [],
+        "requirements": {
+            "skill_persistence": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "3 раза получить любой перелом и выжить.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "rescuer": {
+        "name": "Спасатель",
+        "cost": -1,
+        "description": "Похоже вам место в медэваке.",
+        "text_modifier": "В бою вы можете утаскивать сразу двух раненых за ход.",
+        "modifiers": [],
+        "requirements": {
+            "skill_strength": 4
+        },
+        "biografy_requirements": {},
+        "text_requirements": "10 раз спасти кого-либо из-под огня.",
+        "type": "positive",
+        "unique": "no"
+    },
+    "coward": {
+        "name": "Трус",
+        "cost": 2,
+        "description": "Вы тот самый человек, который боится почти всего",
+        "text_modifier": "Весь урон по МЗ умножается на 2",
+        "modifiers": [],
+        "requirements": {},
+        "biografy_requirements": {
+            "2": [
+                9,
+                10
+            ],
+            "9": [
+                3
+            ],
+            "7": [
+                5,
+                4
+            ]
+        },
+        "text_requirements": "",
+        "type": "negative",
+        "unique": "no"
+    },
+    "the_severed_ear": {
+        "name": "Оторванное ухо",
+        "cost": 0,
+        "description": "Вы лишились одной из своих ушных раковин.",
+        "text_modifier": "Передвигаясь на расстояние большее, чем 5 метров, вы не сможете передвигаться в следующем ходу. Также вы получаете дебафф -4, связанный со всеми проверками слуха.",
+        "modifiers": [],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "Стабилизация: порог 18, требуется бинт. В случае успеха, расстояние, пройдя которое вы теряете возможность передвигаться в следующем ходу, увеличивается до 10 метров. Лечение: порог 20. В случае успеха, вы снова можете перемещаться свободно, а дебафф связанный с проверками слуха, уменьшается до -2 на всю оставшуюся жизнь",
+        "type": "negative",
+        "unique": "yes"
+    },
+    "knocked_out_teeth": {
+        "name": "Выбитые зубы",
+        "cost": 0,
+        "description": "Вследствие серьёзной травмы ротовой полости, почти все ваши зубы оказались выбиты. Теперь вы заметно шепелявите и плюётесь слюной.",
+        "text_modifier": "Вы получаете дебафф -3 ко всем действиям, связанным с речью, а также дефект речи на всю оставшуюся жизнь.",
+        "modifiers": [],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "Стабилизация: нет. Лечение: нет.",
+        "type": "negative",
+        "unique": "yes"
+    },
+    "shattered_fingers": {
+        "name": "Раздробленные пальцы",
+        "cost": 0,
+        "description": "От ваших пальцев на руке остались кровавые ошмётки, которые, кажется, всё ещё поддаются некоторому восстановлению.",
+        "text_modifier": "Вы получаете дебафф -5 на все действия, совершённые при помощи этой руки ( в т.ч. стрельба), а также кровотечение - каждый ход вы теряете 4 ПЗ.",
+        "modifiers": [],
+        "requirements": {},
+        "biografy_requirements": {},
+        "text_requirements": "Стабилизация: порог 20, требуется два бинта. В случае успеха, кровотечение прекращается, однако, совершая любое действие при помощи повреждённый руки, возникает 30% шанс открытия кровотечения с новой силой. Лечение: порог 22. В случае успеха, ваш дебафф на все действия, совершённые при помощи этой руки, снижается до -2 на всю оставшуюся жизнь.",
+        "type": "negative",
+        "unique": "yes"
+    }
+}

@@ -1,0 +1,59 @@
+{
+    "equipment": {
+        "weapon_slot": null,
+        "melee_slot": null,
+        "armor_slot": null,
+        "head_slot": null,
+        "mask_slot": null,
+        "detector_anomaly_slot": "u_otklik_dde462",
+        "detector_artefact_slot": null,
+        "eyes_slot": null,
+        "ears_slot": null
+    },
+    "inventory": {
+        "static": {
+            "medkit": 43,
+            "energy_drink": 17
+        },
+        "unique": {
+            "u_ak74_898f94": {
+                "type": "weapon",
+                "stackable": "no",
+                "template": "ak74",
+                "username": "АК-74",
+                "userdesc": null,
+                "userpicture": null,
+                "durability": 10,
+                "modifications": []
+            },
+            "u_ak74_74127c": {
+                "type": "weapon",
+                "stackable": "no",
+                "template": "ak74",
+                "username": "АК-74",
+                "userdesc": null,
+                "userpicture": null,
+                "durability": 10,
+                "modifications": []
+            },
+            "u_ak74_fdf5d7": {
+                "type": "weapon",
+                "stackable": "no",
+                "template": "ak74",
+                "username": "АК-74",
+                "userdesc": null,
+                "userpicture": null,
+                "durability": 10,
+                "modifications": []
+            },
+            "u_otklik_dde462": {
+                "type": "anomaly_detector",
+                "stackable": "no",
+                "template": "otklik",
+                "username": "Отклик",
+                "userdesc": null,
+                "userpicture": null
+            }
+        }
+    }
+}

@@ -1,0 +1,202 @@
+[
+    {
+        "char_name": "Кагуя",
+        "heal_points": [
+            29,
+            0
+        ],
+        "mental_points": [
+            35,
+            0
+        ],
+        "radiation_points": [
+            15,
+            0
+        ],
+        "carry_weight": [
+            23.7,
+            0
+        ],
+        "movement_speed": [
+            0
+        ],
+        "psi_resist": [
+            0
+        ],
+        "reputation": [
+            0
+        ],
+        "buffs": [
+            "energy_drink_buff"
+        ],
+        "debuffs": [
+            "half_weight"
+        ],
+        "positive_traits": [],
+        "negative_traits": [],
+        "rubles": 999738000
+    },
+    {
+        "skill_group": [
+            "reaction",
+            "Реакция",
+            6,
+            0
+        ],
+        "skill_handguns": [
+            "Пистолеты",
+            0,
+            0
+        ],
+        "skill_shotguns": [
+            "Дробовики",
+            0,
+            0
+        ],
+        "skill_assaultrifle": [
+            "Автоматы",
+            0,
+            0
+        ],
+        "skill_sniperrifle": [
+            "Снайп.винт.",
+            0,
+            0
+        ],
+        "skill_heavyweapon": [
+            "Тяж. оруж.",
+            0,
+            0
+        ]
+    },
+    {
+        "skill_group": [
+            "craft",
+            "Ремесло",
+            6,
+            0
+        ],
+        "skill_electronics": [
+            "Электрон.",
+            0,
+            0
+        ],
+        "skill_basetech": [
+            "Баз. тех.",
+            0,
+            0
+        ],
+        "skill_armtech": [
+            "Оруж. тех.",
+            0,
+            0
+        ],
+        "skill_medicine": [
+            "Медицина",
+            18,
+            0
+        ],
+        "skill_pyrotech": [
+            "Пиротех",
+            0,
+            0
+        ],
+        "skill_infosecurity": [
+            "Инфобез",
+            0,
+            0
+        ]
+    },
+    {
+        "skill_group": [
+            "intellect",
+            "Интеллект",
+            7,
+            0
+        ],
+        "skill_attention": [
+            "Внимание",
+            2,
+            0
+        ],
+        "skill_mutants": [
+            "Мутанты",
+            2,
+            0
+        ],
+        "skill_anomaly": [
+            "Аномалии",
+            2,
+            0
+        ],
+        "skill_artefacts": [
+            "Артефакты",
+            2,
+            0
+        ],
+        "skill_zoneknowledge": [
+            "Знание Зоны",
+            2,
+            0
+        ]
+    },
+    {
+        "skill_group": [
+            "dexterity",
+            "Ловкость",
+            6,
+            0
+        ],
+        "skill_agility": [
+            "Манёврен.",
+            5,
+            0
+        ],
+        "skill_stealth": [
+            "Скрытность",
+            0,
+            0
+        ],
+        "skill_closecombat": [
+            "Ближний бой",
+            5,
+            0
+        ]
+    },
+    {
+        "skill_group": [
+            "body",
+            "Телосложение",
+            4,
+            0
+        ],
+        "skill_strength": [
+            "Сила",
+            5,
+            0
+        ],
+        "skill_persistence": [
+            "Стойкость",
+            5,
+            0
+        ]
+    },
+    {
+        "skill_group": [
+            "empathy",
+            "Эмпатия",
+            6,
+            0
+        ],
+        "skill_trade": [
+            "Торговля",
+            0,
+            0
+        ],
+        "skill_communication": [
+            "Общение",
+            5,
+            0
+        ]
+    }
+]

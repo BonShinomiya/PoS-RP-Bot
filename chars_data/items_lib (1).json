@@ -1,0 +1,9 @@
+{
+    "ammo_5.45": {
+        "name": "Патроны 5.45х39",
+        "description": "Описание",
+        "type": "ammo",
+        "weight_per_item": 0.012,
+        "base_price": 13
+    }
+}

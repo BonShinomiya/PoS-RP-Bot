@@ -1,0 +1,16 @@
+{
+    "energy_drink_buff": {
+        "name": "Прилив сил (энергетик)",
+        "description": "Энергетик вас явно взбодрил.",
+        "text_modifier": "",
+        "modifiers": [
+            [
+                "derived",
+                "movement_speed",
+                2
+            ]
+        ],
+        "type": "negative",
+        "unique": "no"
+    }
+}
