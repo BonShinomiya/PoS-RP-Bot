@@ -3009,13 +3009,4 @@ class ShopBuyCountModal(disnake.ui.Modal):
         )
         
         self.shop_view.selected_shop_item = None
-
-        # --- ИСПРАВЛЕНИЕ БАГА: ЖЕСТКО ОБНОВЛЯЕМ ИМЕННО РОДИТЕЛЬСКОЕ СООБЩЕНИЕ МАГАЗИНА ---
-        # Сначала генерируем обновленный эмбед и компоненты внутри самого shop_view
-        # Для этого нам нужно временно переписать логику, чтобы send_shop_window не отправлял ответ сам, 
-        # а просто подготавливал данные, НО мы можем сделать изящнее:
-        
-        # Вызываем пересчет внутренностей магазина (баланс, кнопки, поля прейскуранта)
-        # Но вместо inter.response.send_message внутри send_shop_window, мы заставим модалку 
-        # сделать edit_message. Передаем управление в send_shop_window!
         await self.shop_view.send_shop_window(inter)
