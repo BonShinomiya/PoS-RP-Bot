@@ -1,3 +1,5 @@
+# Авторство кода - Discord: @joemendozacomposer4432
+
 import disnake
 import random
 from random import choice

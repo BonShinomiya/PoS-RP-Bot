@@ -1,8 +1,8 @@
 {
     "equipment": {
-        "weapon_slot": null,
+        "weapon_slot": "u_ak74_fdf5d7",
         "melee_slot": null,
-        "armor_slot": null,
+        "armor_slot": "u_vest_300845",
         "head_slot": null,
         "mask_slot": null,
         "detector_anomaly_slot": "u_otklik_dde462",
@@ -12,30 +12,10 @@
     },
     "inventory": {
         "static": {
-            "medkit": 43,
-            "energy_drink": 17
+            "medkit": 5,
+            "energy_drink": 3
         },
         "unique": {
-            "u_ak74_898f94": {
-                "type": "weapon",
-                "stackable": "no",
-                "template": "ak74",
-                "username": "АК-74",
-                "userdesc": null,
-                "userpicture": null,
-                "durability": 10,
-                "modifications": []
-            },
-            "u_ak74_74127c": {
-                "type": "weapon",
-                "stackable": "no",
-                "template": "ak74",
-                "username": "АК-74",
-                "userdesc": null,
-                "userpicture": null,
-                "durability": 10,
-                "modifications": []
-            },
             "u_ak74_fdf5d7": {
                 "type": "weapon",
                 "stackable": "no",
@@ -53,6 +33,48 @@
                 "username": "Отклик",
                 "userdesc": null,
                 "userpicture": null
+            },
+            "u_vest_300845": {
+                "type": "armor",
+                "stackable": "no",
+                "template": "vest",
+                "username": "Бронежилет",
+                "userdesc": null,
+                "userpicture": null,
+                "issued_effects": [],
+                "plate": "u_plate_4m_971838",
+                "additional_armor": null,
+                "armor_points": [
+                    12,
+                    12
+                ],
+                "additional_armor_points": [
+                    0,
+                    0
+                ],
+                "electro_resist": 2,
+                "termo_resist": 2,
+                "chemical_resist": 2,
+                "radiation_resist": 2,
+                "anomaly_mods": 5,
+                "setup_anomaly_mods": [
+                    "termo_1"
+                ],
+                "setup_mods": [],
+                "artefact_containers": {},
+                "current_artefact_equip": []
+            },
+            "u_plate_4m_971838": {
+                "type": "armor_plate",
+                "stackable": "no",
+                "template": "plate_4m",
+                "username": "Плита (Сталь) II",
+                "userdesc": null,
+                "userpicture": null,
+                "armor_points": [
+                    12,
+                    12
+                ]
             }
         }
     }

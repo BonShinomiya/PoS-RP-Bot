@@ -1,3 +1,5 @@
+# Авторство кода - Discord: @joemendozacomposer4432
+
 import disnake
 from configs import *
 

@@ -1075,7 +1075,7 @@ async def pos_item_check(
                 f"• Снимает статусы: `{removes_str}`"
             )
     
-    # --- 2. ВЕТКА: Огнестрел, Ножи, Модификации оружия ---
+    # --- 2. ВЕТКА: Огнестрел, Ножи, Модификации оружия (ОБНОВЛЕНО) ---
     elif item_type in ["weapon", "melee_weapon", "gun_modification"]:
         stats = item_data.get("base_stats", {})
         text_feat = item_data.get("text_feature", "Отсутствует")
@@ -1088,8 +1088,12 @@ async def pos_item_check(
                 f"• Особое свойство: *{text_feat}*"
             )
         elif item_type == "gun_modification":
+            mod_af = item_data.get("mod_auto_fire")
+            mod_af_readable = "Включает автоогонь" if mod_af == "yes" else ("Выключает автоогонь" if mod_af == "no" else "Не влияет")
+            
             spec_info = (
                 f"**[Модификаторы оружейного обвеса]**\n"
+                f"• Изменение автоогня: `{mod_af_readable}`\n"
                 f"• Модификатор урона: `{format_dice_array(stats.get('damage', [0, 0]))}`\n"
                 f"• Изменение отдачи: `{stats.get('recoil', 0)}` | Точность: `{stats.get('accuracy', 0)}`\n"
                 f"• Изменение кучности: `{stats.get('grouping', 0)}` | Надежность: `{stats.get('reliability', 0)}`\n"
@@ -1097,8 +1101,13 @@ async def pos_item_check(
                 f"• Особое свойство: *{text_feat}*"
             )
         else:  # weapon
+            wep_class = item_data.get("weapon_class", "Пистолет")
+            auto_fire_readable = "Да" if item_data.get("auto_fire", "no") == "yes" else "Нет"
+            
             spec_info = (
                 f"**[Боевые характеристики оружия]**\n"
+                f"• Класс оружия: `{wep_class}`\n"
+                f"• Автоматический огонь: `{auto_fire_readable}`\n"
                 f"• Урон: `{format_dice_array(stats.get('damage', [1, 0]))}`\n"
                 f"• Отдача: `{stats.get('recoil', 0)}` | Точность: `{stats.get('accuracy', 0)}`\n"
                 f"• Кучность: `{stats.get('grouping', 3)}` | Надежность: `{stats.get('reliability', 10)}`\n"
@@ -1116,13 +1125,14 @@ async def pos_item_check(
             issued_names = [effects_lib.get(x, {}).get("name", x) for x in issued_effs if x]
             effs_str = ", ".join(issued_names) if issued_names else "Отсутствуют"
             
-            # ИСПРАВЛЕНО: Читаем правильный ключ и ставим дефолт 6, если пусто
-            anom = item_data.get("base_anomaly_mods", 6) 
+            az_val = item_data.get("base_anomaly_resist", 0) # Читаем АЗ костюма
+            daz_val = item_data.get("base_anomaly_mods", 6)   # Читаем ДАЗ костюма
             
             spec_info = (
                 f"**[Характеристики комбинезона]**\n"
                 f"• Класс защиты (очки): `{pts[1]} БП`\n"
-                f"• Базовый ДАЗ: `{anom}`\n"
+                f"• Аномальная защита (АЗ): `{az_val}`\n"
+                f"• Доступный ДАЗ (Ячейки модов): `{daz_val}`\n"
                 f"• Встроенные эффекты: `{effs_str}`\n"
                 f"• Особое свойство: *{text_feat}*"
             )
@@ -1148,7 +1158,6 @@ async def pos_item_check(
 
     # --- 4. ВЕТКА: Бронеплиты, Модификаторы брони, Навесы ---
     elif item_type in ["armor_plate", "add_armor", "mounted_mod", "helmet_mods", "anomal_mod"]:
-        
         if item_type == "anomal_mod":
             req = item_data.get("anomaly_mod_req", 1)
             resists = item_data.get("add_resist", {})
@@ -1161,7 +1170,6 @@ async def pos_item_check(
                 f"• Мод. Химзащиты: `{resists.get('chemical_resist', 0)}`\n"
                 f"• Мод. Радиационной защиты: `{resists.get('radiation_resist', 0)}`"
             )
-            
         elif item_type in ["armor_plate", "add_armor"]:
             pts = item_data.get("armor_points", [0, 0])
             eff_str = ""
@@ -1173,7 +1181,6 @@ async def pos_item_check(
                 f"• Очки брони (armor_points): `{pts[1]} ПБ`\n"
                 f"{eff_str}"
             )
-            
         elif item_type == "helmet_mods":
             mods = item_data.get("modificators", {})
             spec_info = (
@@ -1185,7 +1192,6 @@ async def pos_item_check(
                 f"• Мод. Радиационной защиты: `{mods.get('radiation_resist', 0)}`\n"
                 f"• Мод. Пси-защиты: `{mods.get('psy_resist', 0)}`"
             )
-            
         else: # mounted_mod
             mods = item_data.get("modificators", {})
             effs = item_data.get("issued_effect", [])
@@ -1214,7 +1220,7 @@ async def pos_item_check(
         if item_type == "artefact_detector":
             spec_info = (
                 f"**[Параметры электроники]**\n"
-                f"• Класс детектора: `{item_data.get('class', 1)}`\n"
+                f"• Класс прибора: `{item_data.get('class', 1)}`\n"
                 f"• Эффект при работе устройства: `{eff_str}`\n"
                 f"• Свойство работы: *{item_data.get('text_feature', 'Отсутствует')}*"
             )

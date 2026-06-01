@@ -35,7 +35,10 @@
         "text_feature": "Встроенный пламегаситель.",
         "username": null,
         "userdesc": null,
-        "userpicture": null
+        "userpicture": null,
+        "weapon_class": "Штурмовая винтовка",
+        "associated_skill": "skill_assaultrifle",
+        "auto_fire": "yes"
     },
     "energy_drink": {
         "name": "Энергетик \"S.T.A.L.K.E.R.\"",
@@ -73,5 +76,56 @@
         "username": null,
         "userdesc": null,
         "userpicture": null
+    },
+    "vest": {
+        "name": "Бронежилет",
+        "description": "Производимый народными умельцами, комбинезон представляет собой сочетание двухслойной прорезиненной ткани с плексигласовой прокладкой. Костюм очень распространён из-за дешевизны и широких возможностей для улучшения.",
+        "type": "armor",
+        "stackable": "no",
+        "weight_per_item": 2.0,
+        "base_price": 4000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "armor_points": [
+            0,
+            0
+        ],
+        "base_anomaly_resist": 2,
+        "username": null,
+        "userdesc": null,
+        "userpicture": null,
+        "issued_effects": [],
+        "base_anomaly_mods": 6,
+        "text_feature": ""
+    },
+    "plate_4m": {
+        "name": "Плита (Сталь) II",
+        "description": "**[Условие пробития]**: [Урон > ПБ + 5]\n**[Материал]**: Сталь",
+        "type": "armor_plate",
+        "stackable": "no",
+        "weight_per_item": 7.0,
+        "base_price": 15000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "armor_points": [
+            12,
+            12
+        ]
+    },
+    "termo_1": {
+        "name": "Модакриловые волокна",
+        "description": "Описание отсутствует",
+        "type": "anomaly_mod",
+        "stackable": "yes",
+        "weight_per_item": 0.3,
+        "base_price": 4000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "add_resist": {
+            "termo_resist": 4
+        }
     }
 }
