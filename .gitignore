@@ -1,2 +1,4 @@
 .env
 .code-workspace
+user_profiles/
+__pycache__/

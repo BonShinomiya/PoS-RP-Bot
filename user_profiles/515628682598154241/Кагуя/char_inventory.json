@@ -1,14 +1,8 @@
 {
     "equipment": {
-        "weapon_slot": "u_ak74_fdf5d7",
-        "melee_slot": null,
-        "armor_slot": "u_vest_300845",
-        "head_slot": null,
-        "mask_slot": null,
-        "detector_anomaly_slot": "u_otklik_dde462",
-        "detector_artefact_slot": null,
-        "eyes_slot": null,
-        "ears_slot": null
+        "weapon_slot": null,
+        "armor_slot": null,
+        "detector_anomaly_slot": "u_otklik_dde462"
     },
     "inventory": {
         "static": {
@@ -24,7 +18,9 @@
                 "userdesc": null,
                 "userpicture": null,
                 "durability": 10,
-                "modifications": []
+                "modifications": [
+                    "silencer"
+                ]
             },
             "u_otklik_dde462": {
                 "type": "anomaly_detector",
@@ -34,14 +30,71 @@
                 "userdesc": null,
                 "userpicture": null
             },
-            "u_vest_300845": {
+            "u_plate_4m_971838": {
+                "type": "armor_plate",
+                "stackable": "no",
+                "template": "plate_4m",
+                "username": "Плита (Сталь) II",
+                "userdesc": null,
+                "userpicture": null,
+                "armor_points": [
+                    12,
+                    12
+                ]
+            },
+            "u_pseudo_vest_1bf1cd": {
+                "type": "armor",
+                "stackable": "no",
+                "template": "pseudo_vest",
+                "username": "Бронежилет \"Кофеин\"",
+                "userdesc": null,
+                "userpicture": null,
+                "issued_effects": [
+                    "energy_drink_buff"
+                ],
+                "plate": null,
+                "additional_armor": null,
+                "armor_points": [
+                    0,
+                    0
+                ],
+                "additional_armor_points": [
+                    0,
+                    0
+                ],
+                "electro_resist": 4,
+                "termo_resist": 4,
+                "chemical_resist": 4,
+                "radiation_resist": 4,
+                "anomaly_mods": 4,
+                "setup_anomaly_mods": [],
+                "setup_mods": [],
+                "artefact_containers": {},
+                "current_artefact_equip": []
+            },
+            "u_default_container_abc6ba": {
+                "type": "artefact_container",
+                "stackable": "no",
+                "template": "default_container",
+                "username": "Поясной контейнер для артефактов",
+                "userdesc": null,
+                "userpicture": null,
+                "holder_armor_uid": "u_vest_5b8627",
+                "artifacts": [
+                    "art_beef"
+                ],
+                "installed_mod": "leading_1"
+            },
+            "u_vest_5b8627": {
                 "type": "armor",
                 "stackable": "no",
                 "template": "vest",
                 "username": "Бронежилет",
                 "userdesc": null,
                 "userpicture": null,
-                "issued_effects": [],
+                "issued_effects": [
+                    "energy_drink_buff"
+                ],
                 "plate": "u_plate_4m_971838",
                 "additional_armor": null,
                 "armor_points": [
@@ -61,19 +114,8 @@
                     "termo_1"
                 ],
                 "setup_mods": [],
-                "artefact_containers": {},
-                "current_artefact_equip": []
-            },
-            "u_plate_4m_971838": {
-                "type": "armor_plate",
-                "stackable": "no",
-                "template": "plate_4m",
-                "username": "Плита (Сталь) II",
-                "userdesc": null,
-                "userpicture": null,
-                "armor_points": [
-                    12,
-                    12
+                "setup_containers": [
+                    "u_default_container_abc6ba"
                 ]
             }
         }

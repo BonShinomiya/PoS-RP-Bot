@@ -7,6 +7,7 @@ from disnake.ext import commands
 from charlists import *
 from location_explorer import *
 from inventory import *
+from utems import *
 from posmoney import setup
 from dotenv import load_dotenv
 from utils import *
@@ -56,8 +57,6 @@ async def buffer_clear(inter: disnake.ApplicationCommandInteraction):
     print(f"Текущие активные сессии: {bot.active_creations}")
     await inter.response.send_message(content="Буфер активных сессий успешно очищен.", ephemeral=True)
 
-
-
 @bot.event
 async def on_member_join(member): 
     channel = bot.get_channel(664454828671369246)
@@ -73,7 +72,6 @@ async def on_member_join(member):
 #                         icon_url=member.avatar)
 
         await channel.send(f"{member.mention}", embed=embed)
-
 
 @bot.event
 async def on_raw_message_delete(payload):
@@ -1232,6 +1230,19 @@ async def pos_item_check(
             )
         else: # head_eyes
             spec_info = f"**[Параметры электроники]**\n• Свойство работы: *{item_data.get('text_feature', 'Отсутствует')}*"
+    elif item_type in ["artefact_container", "container_mod"]:
+        if item_type == "artefact_container":
+            spec_info = (
+                f"**[Параметры контейнера артефактов]**\n"
+                f"• Количество внутренних слотов: `{item_data.get('slots', 1)}`\n"
+                f"• Класс радиационной защиты: `{item_data.get('radiation_protection_class', 1)}`"
+            )
+        else:
+            spec_info = (
+                f"**[Модификаторы контейнеров]**\n"
+                f"• Изменение емкости (слоты): `+{item_data.get('mod_slots', 0)}`\n"
+                f"• Повышение рад. защиты (класс): `+{item_data.get('mod_radiation_protection', 0)}`"
+            )
     else:
         spec_info = "**[Статичный предмет]**\nУникальные боевые или медицинские коэффициенты отсутствуют."
 

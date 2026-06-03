@@ -38,7 +38,8 @@
         "userpicture": null,
         "weapon_class": "Штурмовая винтовка",
         "associated_skill": "skill_assaultrifle",
-        "auto_fire": "yes"
+        "auto_fire": "yes",
+        "is_salable": "yes"
     },
     "energy_drink": {
         "name": "Энергетик \"S.T.A.L.K.E.R.\"",
@@ -127,5 +128,123 @@
         "add_resist": {
             "termo_resist": 4
         }
+    },
+    "pseudo_vest": {
+        "name": "Бронежилет \"Кофеин\"",
+        "description": "Я сам в ахуе",
+        "type": "armor",
+        "stackable": "no",
+        "weight_per_item": 2.5,
+        "base_price": 7000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "issued_effects": [
+            "energy_drink_buff"
+        ],
+        "armor_points": [
+            0,
+            0
+        ],
+        "base_anomaly_resist": 4,
+        "base_anomaly_mods": 4,
+        "username": null,
+        "userdesc": null,
+        "userpicture": null,
+        "text_feature": ""
+    },
+    "default_container": {
+        "name": "Поясной контейнер для артефактов",
+        "description": "Описание отсутствует",
+        "type": "artefact_container",
+        "stackable": "no",
+        "weight_per_item": 1.0,
+        "base_price": 4000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "radiation_protection_class": 0,
+        "slots": 1
+    },
+    "leading_1": {
+        "name": "Освинцовка I уровня",
+        "description": "Описание отсутствует",
+        "type": "container_mod",
+        "stackable": "yes",
+        "weight_per_item": 0.1,
+        "base_price": 2500,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "mod_radiation_protection": 1,
+        "mod_slots": 0
+    },
+    "art_beef": {
+        "name": "Бифштекс",
+        "description": "Распространённый артефакт гравитационного типа. Представляет из себя один большой кусок биологических остатков мутантов и людей. Сам по себе - круглый, липкий кусок биомассы. Однако, при ношении укрепляет кровеносные сосуды, ослабляя кровотечение. Так-же помимо этого слабо радиоактивен. Стоит быть осторожным, ведь в случае долгого ношения в руке - артефакт придётся отдирать вместе с кожей.",
+        "type": "artefact",
+        "stackable": "yes",
+        "weight_per_item": 0.5,
+        "base_price": 4000,
+        "count_multiply": 1,
+        "picture_url": "https://media.discordapp.net/attachments/1366025635981557841/1366025746367119472/6e33ae30ea6f9763.png?ex=6a201b9d&is=6a1eca1d&hm=cacde435d6af8f81bced942a908170c5e8e4aa2a078d6c422285bea92910394c&=&format=webp&quality=lossless",
+        "deletable": "yes",
+        "use_effects": {},
+        "long_effects": {
+            "add": [
+                "energy_drink_buff"
+            ],
+            "remove": []
+        }
+    },
+    "vstanislav": {
+        "name": "Встанислав Шишкин",
+        "description": "Чё нада? Резиновое дилдо",
+        "type": "melee_weapon",
+        "stackable": "no",
+        "weight_per_item": 2.0,
+        "base_price": 1000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "is_salable": "no",
+        "base_stats": {
+            "damage": [
+                4,
+                0
+            ]
+        },
+        "username": null,
+        "userdesc": null,
+        "userpicture": null,
+        "damage": [
+            1,
+            0
+        ],
+        "text_feature": ""
+    },
+    "silencer": {
+        "name": "Глушитель",
+        "description": "Снижает громкость выстрела и гасит вспышку, (снижает дебафф маскировки за выстрел в три раза), увеличивает урон на? однако при этом понижает надежность. Также имеет ограниченный ресурс, и через время может выйти из строя.",
+        "type": "gun_modification",
+        "stackable": "yes",
+        "weight_per_item": 0.7,
+        "base_price": 2500,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "base_stats": {
+            "damage": [
+                0,
+                1
+            ],
+            "reliability": -2
+        },
+        "text_feature": "[Нельзя установить, если имеется «Пламегаситель» или «Чок»]",
+        "is_salable": "yes",
+        "username": null,
+        "userdesc": null,
+        "userpicture": null,
+        "mod_auto_fire": null
     }
 }

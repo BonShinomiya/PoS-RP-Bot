@@ -7,14 +7,14 @@
         ],
         "mental_points": [
             35,
-            0
+            2115
         ],
         "radiation_points": [
             15,
             0
         ],
         "carry_weight": [
-            15.0,
+            19.8,
             0
         ],
         "movement_speed": [
@@ -26,15 +26,13 @@
         "reputation": [
             0
         ],
-        "buffs": [
-            "energy_drink_buff"
-        ],
+        "buffs": [],
         "debuffs": [
             "half_weight"
         ],
         "positive_traits": [],
         "negative_traits": [],
-        "rubles": 999711000
+        "rubles": 999687000
     },
     {
         "skill_group": [
