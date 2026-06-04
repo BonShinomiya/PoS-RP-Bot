@@ -12,7 +12,6 @@ from typing import Optional, Dict, List
 
 from utils import *
 
-
 async def modify_skill_fp(skill_id: str, bonus_levels: int, folder_path: str):
     path = f"{folder_path}/char_stats.json"
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
@@ -561,6 +560,74 @@ def find_skill(data_list, skill_id):
             return group[skill_id]
     return ["Неизвестно", 0, 0] # Дефолт, если не нашли
 
+class OBTConfirmationView(disnake.ui.View):
+    """Окно подтверждения готовности к тестированию ОБТ."""
+    def __init__(self, parent_view, character_path: str, interactor_id: int):
+        super().__init__(timeout=300)
+        self.parent_view = parent_view
+        self.character_path = character_path
+        self.interactor_id = interactor_id
+
+    @disnake.ui.button(label="Да, я готов", style=disnake.ButtonStyle.red, row=0)
+    async def confirm_cb(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        if inter.author.id != self.interactor_id: 
+            return
+        
+        await inter.response.defer()
+
+        # Блокируем параллельные операции через замок персонажа
+        async with get_char_lock(self.character_path):
+            inv_file_path = os.path.join(self.character_path, "char_inventory.json")
+            stats_file_path = os.path.join(self.character_path, "char_stats.json")
+
+            # Если у персонажа ещё нет файла инвентаря, создаём структуру асинхронно
+            if not os.path.exists(inv_file_path):
+                default_inventory = {
+                    "equipment": {
+                        "weapon_slot": None, "melee_slot": None, "armor_slot": None,
+                        "head_slot": None, "mask_slot": None, "detector_anomaly_slot": None,
+                        "detector_artefact_slot": None, "eyes_slot": None, "ears_slot": None
+                    },
+                    "inventory": {"static": {}, "unique": {}}
+                }
+                try:
+                    async with aiofiles.open(inv_file_path, "w", encoding="utf-8") as f:
+                        await f.write(json.dumps(default_inventory, ensure_ascii=False, indent=4))
+                except Exception as e:
+                    return await inter.followup.send(f"Ошибка создания файла инвентаря: {e}", ephemeral=True)
+
+            # Модифицируем файл характеристик персонажа для ОБТ
+            if os.path.exists(stats_file_path):
+                try:
+                    async with aiofiles.open(stats_file_path, "r", encoding="utf-8") as f:
+                        stats_data = json.loads(await f.read())
+
+                    # Добавляем новый ключ money в первый мета-словарь списка
+                    if isinstance(stats_data, list) and len(stats_data) > 0:
+                        stats_data[0]["money"] = 0
+
+                    async with aiofiles.open(stats_file_path, "w", encoding="utf-8") as f:
+                        await f.write(json.dumps(stats_data, ensure_ascii=False, indent=4))
+                except Exception as e:
+                    return await inter.followup.send(f"Ошибка инициализации валюты ОБТ: {e}", ephemeral=True)
+
+            from inventory import PlayerInventoryMenu
+            
+            inventory_menu = PlayerInventoryMenu(
+                parent_view=self.parent_view, 
+                folder_path=self.character_path, 
+                interactor_id=inter.author.id
+            )
+            
+            # Передаём управление инвентарю
+            await inventory_menu.send_inventory_window(inter)
+
+    @disnake.ui.button(label="Отмена", style=disnake.ButtonStyle.red, row=0)
+    async def cancel_cb(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        if inter.author.id != self.interactor_id: 
+            return
+        await inter.response.edit_message(content="Вход в инвентарь отменен.", embed=None, view=None)
+
 class BaseWorkshopView(disnake.ui.View):
     def __init__(self, bot, user_id, folder_path):
         super().__init__(timeout=900) # Вызов оригинального disnake View
@@ -682,53 +749,107 @@ class CharacterSelectView(disnake.ui.View):
     
     async def btn_character_inventory_callback(self, inter: disnake.MessageInteraction):
         """
-        Точка входа: Переводит интерфейс из меню персонажа в модуль инвентаря.
-        self.character_path — это путь вида 'user_profiles/ID_игрока/Имя_персонажа'
+        Точка входа: Проверка ролей ОБТ, проверка статуса ОБТ у персонажа и переход в инвентарь.
         """
-        # Блокируем параллельные операции через замок конкретного персонажа
-        async with get_char_lock(self.character_path):
-            inv_file_path = os.path.join(self.character_path, "char_inventory.json")
-            
-            # Если у персонажа ещё нет файла инвентаря, создаём базовую пустую структуру
-            if not os.path.exists(inv_file_path):
-                default_inventory = {
-                    "equipment": {
-                        "weapon_slot": None,
-                        "melee_slot": None,
-                        "armor_slot": None,
-                        "head_slot": None,
-                        "mask_slot": None,
-                        "detector_anomaly_slot": None,
-                        "detector_artefact_slot": None,
-                        "eyes_slot": None,
-                        "ears_slot": None
-                    },
-                    "inventory": {
-                        "static": {},  # Складываемые вещи (патроны, медицина)
-                        "unique": {}   # Уникальные шмотки (оружие с дурабилити, костюмы)
-                    }
-                }
-                try:
-                    with open(inv_file_path, "w", encoding="utf-8") as f:
-                        json.dump(default_inventory, f, ensure_ascii=False, indent=4)
-                except Exception as e:
-                    return await inter.response.send_message(
-                        f"❌ Критическая ошибка создания файла инвентаря: {e}", 
-                        ephemeral=True
-                    )
+        obt_roles = {1330594763312988244, 1497975380022263979, 668385755663695882}
+        
+        # Проверка наличия у участника хотя бы одной целевой роли
+        user_roles = {role.id for role in inter.author.roles} if hasattr(inter.author, "roles") else set()
+        if not user_roles.intersection(obt_roles):
+            return await inter.response.send_message(
+                "Вы не являетесь участником ОБТ. Запишитесь в соответствующей теме!", 
+                ephemeral=True
+            )
 
-            # Создаём экземпляр меню инвентаря, передавая выбранного персонажа
-            
+        # Проверяем, подтверждал ли уже игрок участие для ЭТОГО персонажа
+        stats_file_path = os.path.join(self.character_path, "char_stats.json")
+        needs_confirmation = True
+        
+        if os.path.exists(stats_file_path):
+            try:
+                async with aiofiles.open(stats_file_path, "r", encoding="utf-8") as f:
+                    stats_data = json.loads(await f.read())
+                
+                # Если ключ money уже есть, инициализация ОБТ для персонажа пройдена
+                if isinstance(stats_data, list) and len(stats_data) > 0 and "money" in stats_data[0]:
+                    needs_confirmation = False
+            except Exception:
+                pass # В случае ошибки чтения пускаем через этап подтверждения для перезаписи
+
+        # Если подтверждение не требуется, сразу открываем инвентарь
+        if not needs_confirmation:
+            await inter.response.defer()
             from inventory import PlayerInventoryMenu
-            
             inventory_menu = PlayerInventoryMenu(
                 parent_view=self, 
-                folder_path=self.character_path, # Передаем путь К ПЕРСОНАЖУ, а не к юзеру
+                folder_path=self.character_path, 
                 interactor_id=inter.author.id
             )
-            
-            # Передаём управление инвентарю — он займет текущее сообщение
-            await inventory_menu.send_inventory_window(inter)
+            return await inventory_menu.send_inventory_window(inter)
+
+        # Вывод диалога с подтверждением готовности (если money нет)
+        embed = disnake.Embed(
+            title="Подтверждение участия в тестировании",
+            description="Вы действительно готовы принять участие?",
+            color=disnake.Color.red()
+        )
+        
+        confirm_view = OBTConfirmationView(
+            parent_view=self,
+            character_path=self.character_path,
+            interactor_id=inter.author.id
+        )
+        await inter.response.send_message(embed=embed, view=confirm_view, ephemeral=True)
+
+#    async def btn_character_inventory_callback(self, inter: disnake.MessageInteraction):
+#        """
+#        Точка входа: Переводит интерфейс из меню персонажа в модуль инвентаря.
+#        self.character_path — это путь вида 'user_profiles/ID_игрока/Имя_персонажа'
+#        """
+#        # Блокируем параллельные операции через замок конкретного персонажа
+#        async with get_char_lock(self.character_path):
+#            inv_file_path = os.path.join(self.character_path, "char_inventory.json")
+#            
+#            # Если у персонажа ещё нет файла инвентаря, создаём базовую пустую структуру
+#            if not os.path.exists(inv_file_path):
+#                default_inventory = {
+#                    "equipment": {
+#                        "weapon_slot": None,
+#                        "melee_slot": None,
+#                        "armor_slot": None,
+#                        "head_slot": None,
+#                        "mask_slot": None,
+#                        "detector_anomaly_slot": None,
+#                        "detector_artefact_slot": None,
+#                        "eyes_slot": None,
+#                        "ears_slot": None
+#                    },
+#                    "inventory": {
+#                        "static": {},  # Складываемые вещи (патроны, медицина)
+#                        "unique": {}   # Уникальные шмотки (оружие с дурабилити, костюмы)
+#                    }
+#                }
+#                try:
+#                    with open(inv_file_path, "w", encoding="utf-8") as f:
+#                        json.dump(default_inventory, f, ensure_ascii=False, indent=4)
+#                except Exception as e:
+#                    return await inter.response.send_message(
+#                        f"❌ Критическая ошибка создания файла инвентаря: {e}", 
+#                        ephemeral=True
+#                    )
+#
+#            # Создаём экземпляр меню инвентаря, передавая выбранного персонажа
+#            
+#            from inventory import PlayerInventoryMenu
+#            
+#            inventory_menu = PlayerInventoryMenu(
+#                parent_view=self, 
+#                folder_path=self.character_path, # Передаем путь К ПЕРСОНАЖУ, а не к юзеру
+#                interactor_id=inter.author.id
+#            )
+#            
+#            # Передаём управление инвентарю — он займет текущее сообщение
+#            await inventory_menu.send_inventory_window(inter)
 
     async def dice_roll_menu_callback(self, inter: disnake.MessageInteraction):
         self.clear_items()
@@ -1058,7 +1179,6 @@ class CharacterSelectView(disnake.ui.View):
                 await f.write(json.dumps(skills_data, ensure_ascii=False, indent=4))
 
         await self.main_view(inter)
-
 
     async def delete_char_callback(self, inter: disnake.MessageInteraction):
         self.clear_items()

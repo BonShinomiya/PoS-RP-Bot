@@ -3,7 +3,6 @@ import json
 import aiofiles
 import os
 import re
-import asyncio
 import uuid
 
 from utils import *
@@ -13,13 +12,13 @@ ITEMS_LIB_PATH = "chars_data/items_lib.json"
 READABLE_ITEM_TYPES = {
     "narrative": "Нарративный предмет",
     "crafts": "Компонент крафта",
-    "instruments": "Инструмент",
+    "instruments": "Инструменты",
     "ammo": "Боеприпасы",
     "body_part": "Часть тела мутанта",
     "grenade": "Граната / Взрывчатка",
     "medicine": "Медицина / Препараты",
     "food": "Еда / Напитки",
-    "artefact": "Артефакт",
+    "artefact": "Артефакты",
     "weapon": "Огнестрельное оружие",
     "melee_weapon": "Холодное оружие",
     "armor": "Основа брони",
@@ -28,14 +27,14 @@ READABLE_ITEM_TYPES = {
     "anomaly_detector": "Детектор аномалий",
     "artefact_detector": "Детектор артефактов",
     "head_eyes": "Оптика / Приборы ночного видения",
-    "head_ears": "Гарнитура / Активные наушники",
+    "head_ears": "Наушники",
     "armor_plate": "Бронеплита",
     "add_armor": "Защита конечностей",
     "artefact_container": "Контейнер для артефактов",
     "container_mod": "Модификация контейнера артефактов",
     "mounted_mod": "Навесной элемент брони",
     "helmet_mods": "Модификация шлема",
-    "anomaly_mod": "Аномальный элемент защиты"
+    "anomaly_mod": "АЗ-обшивка"
 }
 
 # Человеческие названия укрупненных категорий для отображения в селекторе
@@ -127,6 +126,7 @@ async def add_item_to_inventory(folder_path: str, item_id: str, items_lib: dict,
                     u_card["chemical_resist"] = base_ar
                     u_card["radiation_resist"] = base_ar
                     
+                    u_card["durability"] = 10
                     u_card["anomaly_mods"] = item_template.get("base_anomaly_mods", 6)
                     u_card["setup_anomaly_mods"] = []
                     u_card["setup_mods"] = []
@@ -143,6 +143,7 @@ async def add_item_to_inventory(folder_path: str, item_id: str, items_lib: dict,
                 elif u_card["type"] in ["head_armor", "head_mask"]:
                     u_card["armor_points"] = [item_template.get("base_armor_points", 0), item_template.get("base_armor_points", 0)]
                     u_card["modifications"] = []
+                    u_card["durability"] = 10
                     
                     # Шлемы и маски копируют резисты индивидуально из своего шаблона
                     u_card["electro_resist"] = item_template.get("electro_resist", 0)
@@ -242,6 +243,11 @@ async def sync_character_weight_and_effects(folder_path: str):
             for mod_id in modifications:
                 mod_weight = items_lib.get(mod_id, {}).get("weight_per_item", 0.0)
                 total_weight += mod_weight
+        
+        elif u_data.get("type") in ["head_armor", "head_mask"]:
+            helmet_modifications = u_data.get("helmet_modifications", [])
+            for mod_id in helmet_modifications:
+                total_weight += items_lib.get(mod_id, {}).get("weight_per_item", 0.0)
             
         # --- Специфика контейнеров (вес модов и упакованных артефактов) ---
         elif u_data.get("type") == "artefact_container":
@@ -260,17 +266,25 @@ async def sync_character_weight_and_effects(folder_path: str):
 # 3. Симулируем сборку активных модификаторов из черт и баффов/дебаффов
     active_mods = {}
     for tid in source.get("negative_traits", []):
-        for _, target_id, val in traits_lib.get(tid, {}).get("modifiers", []): active_mods[target_id] = active_mods.get(target_id, 0) + val
+        for _, target_id, val in traits_lib.get(tid, {}).get("modifiers", []): 
+            active_mods[target_id] = active_mods.get(target_id, 0) + val
+
     for tid in source.get("positive_traits", []):
-        for _, target_id, val in traits_lib.get(tid, {}).get("modifiers", []): active_mods[target_id] = active_mods.get(target_id, 0) + val
+        for _, target_id, val in traits_lib.get(tid, {}).get("modifiers", []): 
+            active_mods[target_id] = active_mods.get(target_id, 0) + val
+
     for tid in source.get("buffs", []):
-        for _, target_id, val in effects_lib.get(tid, {}).get("modifiers", []): active_mods[target_id] = active_mods.get(target_id, 0) + val
+        for _, target_id, val in effects_lib.get(tid, {}).get("modifiers", []): 
+            active_mods[target_id] = active_mods.get(target_id, 0) + val
     
     # Полностью игнорируем весовые штрафы при симуляции дебаффов
     overweight_effects = ["quarter_weight", "half_weight", "limit_weight"]
     for tid in source.get("debuffs", []):
-        if tid in overweight_effects: continue
-        for _, target_id, val in effects_lib.get(tid, {}).get("modifiers", []): active_mods[target_id] = active_mods.get(target_id, 0) + val
+        # КРИТИЧЕСКИЙ ФИКС: Если дебафф системный — полностью игнорируем его модификаторы при расчёте max_weight!
+        if tid in overweight_effects: 
+            continue
+        for _, target_id, val in effects_lib.get(tid, {}).get("modifiers", []): 
+            active_mods[target_id] = active_mods.get(target_id, 0) + val
 
     # Helper для чтения чистых ОП навыка из структуры
     def get_skill_fp(data, s_id):
@@ -503,33 +517,34 @@ class UnitedItemsManagementSystem(disnake.ui.View):
         self.selected_stat = None  # Инициализируем пустой параметр для селекторов оружия
         self.effects_lib = None
         self.deletable_status = current_data.get("deletable", "yes") if current_data else "yes"
+        self.mod_target = current_data.get("mod_target", "head_armor") if current_data else "head_armor"
 
         self.selected_group = None # Сюда сохраним первый шаг
 
         # Каноничное древо ролевых категорий PoS RP
         self.item_wizard_tree = {
             "weaponry": {
-                "name": "⚔️ Огнестрельное и холодное оружие",
-                "subtypes": [("Огнестрельное оружие", "weapon"), ("Холодное оружие", "melee_weapon"), ("Оружейные модификации", "gun_modification"), ("Боеприпасы (Патроны)", "ammo"), ("Гранаты / Взрывчатка", "grenade")]
+                "name": "Огнестрельное и холодное оружие",
+                "subtypes": [("Огнестрельное оружие", "weapon"), ("Холодное оружие", "melee_weapon"), ("Оружейные модификации", "gun_modification"), ("Патроны", "ammo"), ("Гранаты", "grenade")]
             },
             "armor_suits": {
-                "name": "👕 Костюмы, шлемы и маски",
-                "subtypes": [("Основа брони (Костюм)", "armor"), ("Шлемы", "head_armor"), ("Противогазы / Маски", "head_mask")]
+                "name": "Костюмы, шлемы и маски",
+                "subtypes": [("Основа брони", "armor"), ("Шлемы", "head_armor"), ("Противогазы", "head_mask")]
             },
             "armor_upgrades": {
-                "name": "🛠️ Модификаторы и навесы брони",
-                "subtypes": [("Бронеплиты", "armor_plate"), ("Защита конечностей", "add_armor"), ("Навесные моды брони", "mounted_mod"), ("Модификации шлемов", "helmet_mods"), ("Аномальные модификаторы костюма", "anomaly_mod")]
+                "name": "Модификаторы и навесы брони",
+                "subtypes": [("Бронеплиты", "armor_plate"), ("Защита конечностей", "add_armor"), ("Навесные моды брони", "mounted_mod"), ("Модификации шлемов", "helmet_mods"), ("Обшивки АЗ", "anomaly_mod")]
             },
             "electronics": {
-                "name": "📟 Детекторы, электроника и контейнеры",
-                "subtypes": [("Детекторы аномалий", "anomaly_detector"), ("Детекторы артефактов", "artefact_detector"), ("Освещение (Слот Зрение)", "head_eyes"), ("Наушники (Слот Уши)", "head_ears"), ("Контейнер для артефактов", "artefact_container"), ("Модификация контейнера", "container_mod")]
+                "name": "Детекторы, электроника и контейнеры",
+                "subtypes": [("Детекторы аномалий", "anomaly_detector"), ("Детекторы артефактов", "artefact_detector"), ("Приборы улучшения видимости", "head_eyes"), ("Наушники", "head_ears"), ("Контейнеры для артефактов", "artefact_container"), ("Модификации КА", "container_mod")]
             },
             "consumables": {
-                "name": "💉 Медицина, провизия и артефакты",
-                "subtypes": [("Медицина / Препараты", "medicine"), ("Еда / Напитки", "food"), ("Артефакт", "artefact")]
+                "name": "Медицина, провизия и артефакты",
+                "subtypes": [("Медицина / Препараты", "medicine"), ("Еда / Напитки", "food"), ("Артефакты", "artefact")]
             },
             "loot_craft": {
-                "name": "🧬 Трофеи, крафт и квесты",
+                "name": "Трофеи, крафт и квесты",
                 "subtypes": [("Ресурсы / Компоненты крафта", "crafts"), ("Инструменты", "instruments"), ("Части тел мутантов", "body_part"), ("Нарративные предметы", "narrative")]
             }
         }
@@ -573,6 +588,9 @@ class UnitedItemsManagementSystem(disnake.ui.View):
 
         if "is_salable" not in data:
             data["is_salable"] = "yes"  # По умолчанию всё разрешено к продаже
+        
+        if self.item_type == "helmet_mods":
+            data["mod_target"] = self.mod_target  # Сохраняем наш новый флаг совместимости
         
         # Список категорий уникального снаряжения, поддерживающего кастомизацию имени/описания
         customizable_equipment = [
@@ -620,7 +638,6 @@ class UnitedItemsManagementSystem(disnake.ui.View):
             if "anomaly_mod_req" not in data: data["anomaly_mod_req"] = 1
             if "add_resist" not in data: data["add_resist"] = {}
         elif self.item_type in ["armor_plate", "add_armor"]:
-            # Гарантируем, что в базе шаблон хранит [макс, макс], например [12, 12]
             if "armor_points" not in data: 
                 data["armor_points"] = [10, 10]
             if self.item_type == "add_armor" and "issued_effect" not in data: 
@@ -628,6 +645,9 @@ class UnitedItemsManagementSystem(disnake.ui.View):
         elif self.item_type in ["mounted_mod", "helmet_mods"]:
             if "issued_effect" not in data: data["issued_effect"] = []
             if "modificators" not in data: data["modificators"] = {}
+            # Инициализация флага совместимости для модификаций шлемов
+            if self.item_type == "helmet_mods":
+                if "mod_target" not in data: data["mod_target"] = "head_armor"
 
         # --- 6. Категория: Детекторы и Электроника ---
         elif self.item_type == "artefact_detector":
@@ -960,7 +980,7 @@ class UnitedItemsManagementSystem(disnake.ui.View):
                     f"**Описание:** *{self.description}*\n\n"
                 )
             
-            embed = disnake.Embed(title="Единая Система Управления Предметами (UIMS)", description=info, color=disnake.Color.red())
+            embed = disnake.Embed(title="Единая система управления предметами (UIMS)", description=info, color=disnake.Color.red())
             if self.picture_url and self.picture_url.startswith(("http://", "https://")):
                 embed.set_image(url=self.picture_url)
             embed.set_footer(text="© By Bon Shinomiya")
@@ -1016,7 +1036,7 @@ class UnitedItemsManagementSystem(disnake.ui.View):
 
         # ЭТАП 3: Универсальный экран глубоких настроек
         elif self.current_screen == "spec":
-            embed = disnake.Embed(title="UIMS: Дополнительные коэффициенты", color=disnake.Color.red())
+            embed = disnake.Embed(title="Дополнительные коэффициенты", color=disnake.Color.red())
             embed.set_footer(text="© By Bon Shinomiya")
             
             # --- СЦЕНАРИЙ 1: Расходники (Еда, Медицина, Артефакты) ---
@@ -1030,9 +1050,9 @@ class UnitedItemsManagementSystem(disnake.ui.View):
 
                 embed.description = (
                     f"**Настройка эффектов для:** `{self.name}`\n\n"
-                    f"- Лечение ПЗ (кубы): `{format_dice_array(effects.get('add_hp', [0, 0]))}`\n"
-                    f"- Восст. МЗ (кубы): `{format_dice_array(effects.get('add_mp', [0, 0]))}`\n"
-                    f"- Вывод РЗ (кубы): `{format_dice_array(effects.get('add_rp', [0, 0]))}`\n"
+                    f"- Лечение ПЗ: `{format_dice_array(effects.get('add_hp', [0, 0]))}`\n"
+                    f"- Восст. МЗ : `{format_dice_array(effects.get('add_mp', [0, 0]))}`\n"
+                    f"- Вывод РЗ: `{format_dice_array(effects.get('add_rp', [0, 0]))}`\n"
                     f"- Накладывает эффекты: `{adds_str or 'нет'}`\n"
                     f"- Снимает эффекты: `{removes_str or 'нет'}`"
                 )
@@ -1178,7 +1198,7 @@ class UnitedItemsManagementSystem(disnake.ui.View):
                 # Фикс кнопки toggler для have_mask (только для шлемов)
                 if self.item_type == "head_armor":
                     current_mask = self.extra_data.get("have_mask", "no")
-                    mask_label = "Блокировать маску: Да" if current_mask == "yes" else "Блокировать маску: Нет"
+                    mask_label = "Блокировать противогаз: Да" if current_mask == "yes" else "Блокировать противогаз: Нет"
                     btn_mask_toggle = disnake.ui.Button(label=mask_label, style=disnake.ButtonStyle.red, row=1)
                     btn_mask_toggle.callback = self.btn_toggle_mask_callback
                     self.add_item(btn_mask_toggle)
@@ -1191,13 +1211,13 @@ class UnitedItemsManagementSystem(disnake.ui.View):
             elif self.item_type in ["armor_plate", "add_armor", "mounted_mod", "helmet_mods", "anomaly_mod"]:
                 options = []
                 
-                # Подсценарий А: Чистые бронеэлементы (Плиты и Конечности)
+                # Подсценарий А: Бронеэлементы
                 if self.item_type in ["armor_plate", "add_armor"]:
                     pts = self.extra_data.get("armor_points", [0, 0])
                     embed.description = f"Бронеэлемент:\n- Очки брони (armor_points): `{pts[1]}`"
                     options.append(disnake.SelectOption(label="Очки брони", value="armor_points"))
                 
-                # Подсценарий Б: Аномальные модификаторы брони (БЕЗ ПСИ-ЗАЩИТЫ)
+                # Подсценарий Б: Аномальные модификаторы брони
                 elif self.item_type == "anomaly_mod":
                     resists = self.extra_data.get("add_resist", {})
                     embed.description = (
@@ -1211,9 +1231,12 @@ class UnitedItemsManagementSystem(disnake.ui.View):
                     )
                     options.append(disnake.SelectOption(label="Потребление ДАЗ", value="anomaly_mod_req"))
                 
-                # Подсценарий В: Модификации шлемов (Единственные, у кого ЕСТЬ пси-защита)
+                # Подсценарий В: Модификации шлемов
                 elif self.item_type == "helmet_mods":
                     resists = self.extra_data.get("modificators", {})
+                    sub_type = self.mod_target
+                    sub_type_readable = "Только для шлемов" if sub_type == "head_armor" else "Только для противогазов"
+                    
                     embed.description = (
                         f"**Модификация шлема:**\n\n"
                         f"**Модификаторы характеристик шлема:**\n"
@@ -1222,11 +1245,12 @@ class UnitedItemsManagementSystem(disnake.ui.View):
                         f"- Мод. Термозащиты: `{resists.get('termo_resist', 0)}`\n"
                         f"- Мод. Химзащиты: `{resists.get('chemical_resist', 0)}`\n"
                         f"- Мод. Радиационной защиты: `{resists.get('radiation_resist', 0)}`\n"
-                        f"- Мод. Пси-защиты: `{resists.get('psy_resist', 0)}`"
+                        f"- Мод. Пси-защиты: `{resists.get('psy_resist', 0)}`\n"
+                        f"- Совместимость: `{sub_type_readable}`"
                     )
                     options.append(disnake.SelectOption(label="Мод. ПБ шлема", value="armor_points"))
 
-                # Подсценарий Г: Навесные элементы костюмов (БЕЗ ПСИ-ЗАЩИТЫ)
+                # Подсценарий Г: Навесные элементы костюмов
                 else: # mounted_mod
                     resists = self.extra_data.get("modificators", {})
                     issued_effs = self.extra_data.get("issued_effect", [])
@@ -1273,6 +1297,21 @@ class UnitedItemsManagementSystem(disnake.ui.View):
                     btn_long = disnake.ui.Button(label="Настроить эффекты модуля", style=disnake.ButtonStyle.red, row=1)
                     btn_long.callback = self.btn_long_effects_callback
                     self.add_item(btn_long)
+
+                # Тумблер переключения типа совместимости модификации шлема
+                if self.item_type == "helmet_mods":
+                    current_sub = self.mod_target
+                    print(f"Текущее значение: {self.mod_target}")
+                    sub_label = "Назначение: Шлемы" if current_sub == "head_armor" else "Назначение: Противогазы"
+                    btn_sub_toggle = disnake.ui.Button(label=sub_label, style=disnake.ButtonStyle.red, row=1)
+                    
+                    async def toggle_sub_cb(i: disnake.MessageInteraction):
+                        curr = self.mod_target
+                        self.mod_target = "head_mask" if curr == "head_armor" else "head_armor"
+                        await self.send_main_window(i)
+                        
+                    btn_sub_toggle.callback = toggle_sub_cb
+                    self.add_item(btn_sub_toggle)
 
             # --- СЦЕНАРИЙ 5: Детекторы и Электроника ---
             elif self.item_type in ["anomaly_detector", "artefact_detector", "head_eyes", "head_ears"]:
@@ -1504,7 +1543,7 @@ class ItemEffectsManagementMenu(disnake.ui.View):
             f"Восстановление МЗ (`add_mp`): `{format_dice_array(eff.get('add_mp', [0, 0]))}`\n"
             f"Вывод радиации РЗ (`add_rp`): `{format_dice_array(eff.get('add_rp', [0, 0]))}`\n"
         )
-        embed = disnake.Embed(title="⚙️ Настройка кубов (use_effects)", description=info, color=disnake.Color.red())
+        embed = disnake.Embed(title="Настройка кубов (use_effects)", description=info, color=disnake.Color.red())
         
         # Селектор выбора параметра для изменения/удаления
         options = [
@@ -1627,7 +1666,7 @@ class ItemLongEffectsManagementMenu(disnake.ui.View):
         if not self.is_equipment:
             info += f"\nТекущая операция: { 'Наложение эффекта' if self.sub_key == 'add' else 'Снятие эффекта' }"
 
-        embed = disnake.Embed(title="UIMS: Привязка статусов UTEMS", description=info, color=disnake.Color.red())
+        embed = disnake.Embed(title="Привязка статусов", description=info, color=disnake.Color.red())
 
         # Ряд 0: Выпадающий список
         options = []
@@ -1765,7 +1804,7 @@ class ItemWeaponManagementMenu(disnake.ui.View):
             f"• Особенность оружия: *{text_feat}*\n"
         )
             
-        embed = disnake.Embed(title="UIMS: Оружейная мастерская ГМа", description=info, color=disnake.Color.red())
+        embed = disnake.Embed(title="Настройка оружия", description=info, color=disnake.Color.red())
         embed.set_footer(text="© By Bon Shinomiya")
         
         # --- 1. РЯД 0: СЕЛЕКТОР КЛАССА ОРУЖИЯ (С ЖЕСТКИМ МАППИНГОМ НАВЫКОВ) ---
@@ -1882,7 +1921,7 @@ class ItemWeaponManagementMenu(disnake.ui.View):
         
         await inter.response.edit_message(embed=embed, view=self)
 
-# ========================================== МОДАЛЬНЫЕ ОКНА РЕДАКТОРА ПРЕДМЕТОВ ==========================================
+# ========================================================= МОДАЛЬНЫЕ ОКНА ==============================================
 
 class ItemTechIdModal(disnake.ui.Modal):
     def __init__(self, prev_view: UnitedItemsManagementSystem):
@@ -2058,7 +2097,11 @@ class WeaponSingleInputModal(disnake.ui.Modal):
                 self.main_view.extra_data["base_stats"] = {}
                 
             if stat == "damage":
-                self.main_view.extra_data["base_stats"]["damage"] = parse_dice_string(raw_val)
+                type = self.main_view.item_type
+                if not type == "melee_weapon":
+                    self.main_view.extra_data["base_stats"]["damage"] = parse_dice_string(raw_val)
+                else:
+                    self.main_view.extra_data["damage"] = parse_dice_string(raw_val)
             else:
                 try:
                     self.main_view.extra_data["base_stats"][stat] = int(raw_val)
@@ -2210,6 +2253,198 @@ class ArmorSingleInputModal(disnake.ui.Modal):
         # Перерисовываем основное окно
         await self.view.send_main_window(inter)
 
+class AutoFireModal(disnake.ui.Modal):
+    """Модальное окно для настройки параметров и количества выстрелов автоогня."""
+    def __init__(self, inv_view, selected_slot: str):
+        self.inv_view = inv_view
+        self.selected_slot = selected_slot
+        components = [
+            disnake.ui.TextInput(
+                label="Количество выстрелов",
+                placeholder="Введите число выстрелов...",
+                custom_id="shots_count",
+                style=disnake.TextInputStyle.short,
+                min_length=1,
+                max_length=2
+            )
+        ]
+        super().__init__(title="Настройка автоматического огня", custom_id="auto_fire_modal", components=components)
+
+    async def callback(self, inter: disnake.ModalInteraction):
+        """Парсинг количества выстрелов и проведение серии проверок в цикле."""
+        await inter.response.defer()
+        import random
+
+        try:
+            shots_count = int(inter.text_values["shots_count"])
+            if shots_count <= 0: shots_count = 1
+        except ValueError:
+            shots_count = 1
+
+        inv_data = await self.inv_view.load_json_file(self.inv_view.inventory_path)
+        items_lib = await self.inv_view.load_json_file(self.inv_view.items_lib_path)
+        
+        traits_lib = {}
+        if os.path.exists("chars_data/traits_lib.json"):
+            async with aiofiles.open("chars_data/traits_lib.json", "r", encoding="utf-8") as f:
+                traits_lib = json.loads(await f.read())
+                
+        effects_lib = {}
+        if os.path.exists("chars_data/effects_lib.json"):
+            async with aiofiles.open("chars_data/effects_lib.json", "r", encoding="utf-8") as f:
+                effects_lib = json.loads(await f.read())
+
+        stats_path = os.path.join(self.inv_view.folder_path, "char_stats.json")
+        async with aiofiles.open(stats_path, "r", encoding="utf-8") as f:
+            skills_data = json.loads(await f.read())
+
+        char_name = skills_data[0]["char_name"]
+
+        eq = inv_data.get("equipment", {})
+        u_id = eq.get(self.selected_slot)
+        unique_bag = inv_data.get("inventory", {}).get("unique", {})
+        
+        u_data = unique_bag.get(u_id, {})
+        item_template = items_lib.get(u_data.get("template", u_id), {})
+        weapon_name = u_data.get("username") or item_template.get("name", u_id)
+
+        # Фиксированные параметры навыка для проведения автоогня
+        selected_skill = "skill_strength"
+        selected_group = "body"
+
+        active_mods = {}
+        source_meta = skills_data[0]
+        combined_sources = source_meta.get("buffs", []) + source_meta.get("debuffs", []) + source_meta.get("positive_traits", []) + source_meta.get("negative_traits", [])
+        
+        for src_id in combined_sources:
+            mods = traits_lib.get(src_id, {}).get("modifiers", []) or effects_lib.get(src_id, {}).get("modifiers", [])
+            for mod in mods:
+                if len(mod) >= 3:
+                    active_mods[mod[1]] = active_mods.get(mod[1], 0) + mod[2]
+
+        skill_group_level = 0
+        calculated_level = 0
+        skill_modificator = 0
+        skill_group_modificator = 0
+
+        for group in skills_data[1:7]:
+            group_id = group.get("skill_group", [None])[0]
+            if group_id == selected_group:
+                skill_group_raw = group.get("skill_group", ["body", "Телосложение", 0, 0])
+                skill_group_level = skill_group_raw[2] if isinstance(skill_group_raw, list) else 0
+                skill_group_modificator = skill_group_raw[3] if isinstance(skill_group_raw, list) else 0
+                skill_group_modificator += active_mods.get(selected_group, 0)
+
+            for key, value in group.items():
+                if key == selected_skill:
+                    skill_fp_value = value[1] if isinstance(value, list) and len(value) >= 2 else 0
+                    skill_modificator = value[2] if isinstance(value, list) and len(value) >= 3 else 0
+                    skill_modificator += active_mods.get(selected_skill, 0)
+                    calculated_level = calculate_skill_level(skill_fp_value)
+                    break
+
+        base = skill_group_level + calculated_level + skill_modificator + skill_group_modificator
+        
+        stats_lines = []
+        features_lines = []
+
+        if item_template.get("text_feature"):
+            features_lines.append(f"• **Основа**: *{item_template['text_feature']}*")
+
+        base_stats = item_template.get("base_stats", {})
+        damage_arr = list(base_stats.get("damage", [1, 0]))
+        recoil = base_stats.get("recoil", 0)
+        accuracy = base_stats.get("accuracy", 0)
+        grouping = base_stats.get("grouping", 3)
+        reliability = base_stats.get("reliability", 10)
+
+        for mod_id in u_data.get("modifications", []):
+            m_tmpl = items_lib.get(mod_id, {})
+            m_stats = m_tmpl.get("base_stats", {})
+            m_dmg = m_stats.get("damage", [0, 0])
+            
+            damage_arr[0] += m_dmg[0]
+            damage_arr[1] += m_dmg[1]
+            recoil += m_stats.get("recoil", 0)
+            accuracy += m_stats.get("accuracy", 0)
+            grouping += m_stats.get("grouping", 0)
+            reliability += m_stats.get("reliability", 0)
+
+            if m_tmpl.get("text_feature"):
+                features_lines.append(f"• **{m_tmpl.get('name', mod_id)}**: *{m_tmpl['text_feature']}*")
+
+        w_durability = u_data.get("durability", 10)
+        rel_penalty = 1 if 2 <= w_durability <= 6 else (2 if w_durability <= 1 else 0)
+        final_rel = max(0, reliability - rel_penalty)
+
+        stats_lines.extend([
+            f"**Режим стрельбы:** `Автоматический огонь ({shots_count} выстр.)`",
+            f"**Точность:** `{accuracy}` | **Кучность:** `{grouping}`",
+            f"**Отдача:** `{recoil}` | **Надежность:** `{final_rel}/{reliability}`",
+            f"**Состояние:** `{w_durability}/10`"
+        ])
+
+        embed = disnake.Embed(
+            title=f"Автоматический огонь — {char_name}",
+            description=f"Оружие: **{weapon_name}**",
+            color=disnake.Color.red()
+        )
+
+        # Генерация итераций под каждый выстрел
+        for shot_idx in range(shots_count):
+            dice_roll = random.randint(1, 10)
+            total_dice = dice_roll
+            history_str = ""
+            
+            if dice_roll == 10:
+                total, history = self.inv_view.roll_exploding_dice(10, "up")
+                total_dice = dice_roll + total
+                history_str = " + " + " + ".join(map(str, history))
+            elif dice_roll == 1:
+                dice_roll_down = random.randint(1, 10)
+                if dice_roll_down == 1:
+                    explosions_total, history = self.inv_view.roll_exploding_dice(10, "down") 
+                    total_dice = -(dice_roll + dice_roll_down + explosions_total)
+                    history_str = f" - {dice_roll_down} - {' - '.join(map(str, history))}"
+                else:
+                    total_dice = -(dice_roll + dice_roll_down)
+                    history_str = f" - {dice_roll_down}"
+
+            # Добавляем параметр точности к проверке удержания при автоогне
+            final_result = base + total_dice + accuracy
+            char_part = f"{skill_group_level} + {skill_group_modificator} + {calculated_level} + {skill_modificator}"
+            
+            if total_dice >= 0:
+                full_formula = f"{char_part} + {accuracy}(Точность) + {dice_roll}{history_str} = **=== {final_result} ===**"
+            else:
+                full_formula = f"{char_part} + {accuracy}(Точность){history_str} - {dice_roll} = **=== {final_result} ===**"
+
+            # Формула урона со штрафом автоогня (X - 1)
+            dmg_count = max(1, damage_arr[0] - 1)
+            dmg_modifier = damage_arr[1]
+            
+            dmg_rolls = [random.randint(1, 6) for _ in range(dmg_count)]
+            dmg_rolls_sum = sum(dmg_rolls)
+            final_damage = dmg_rolls_sum + dmg_modifier
+
+            sign_dmg = "+" if dmg_modifier >= 0 else ""
+            
+            field_value = (
+                f"**Навык:** {full_formula}\n"
+                f"**Урон:** `{dmg_count}d6{sign_dmg}{dmg_modifier}` -> `{dmg_rolls}` = **=== {final_damage} ===**"
+            )
+            embed.add_field(name=f"Выстрел #{shot_idx + 1}", value=field_value, inline=False)
+
+        if stats_lines:
+            embed.add_field(name="Свойства оружия", value="\n".join(stats_lines), inline=False)
+        if features_lines:
+            embed.add_field(name="Текстовые особенности", value="\n".join(features_lines), inline=False)
+            
+        embed.set_image(url="https://media.discordapp.net/attachments/1000404313304207370/1440652895258279946/image.png?ex=6a22a790&is=6a215610&hm=b1914f6edb6be45f7731d4459771ade0687705c35de51cfa57c2680e99b9dc4d&=&format=webp")
+
+        await inter.channel.send(embed=embed)
+        await self.inv_view.send_inventory_window(inter)
+
 # =================================================== ИНВЕНТАРЬ ============================================
 
 class PlayerInventoryMenu(disnake.ui.View):
@@ -2248,41 +2483,143 @@ class PlayerInventoryMenu(disnake.ui.View):
         char_name = char_stats[0].get("char_name", "Сталкер") if char_stats and isinstance(char_stats, list) else "Сталкер"
         current_weight = char_stats[0].get("carry_weight", [0.0])[0]
 
-        # ========================================== ВКЛАДКА: ПЕРСОНАЖ ==========================================
+# ========================================== ВКЛАДКА: ПЕРСОНАЖ ==========================================
         if self.current_tab == "character":
             eq = inv_data.get("equipment", {})
             unique_bag = inv_data.get("inventory", {}).get("unique", {})
             
+            # Подсчет суммарной защиты от аномалий
+            total_electro = 0
+            total_termo = 0
+            total_chemical = 0
+            total_radiation = 0
+            total_psy = 0
+
+            # Расчет модификаторов комбинезона
+            armor_uid = eq.get("armor_slot")
+            if armor_uid and armor_uid in unique_bag:
+                a_data = unique_bag[armor_uid]
+                a_tmpl = items_lib.get(a_data.get("template", armor_uid), {})
+                b_ar = a_tmpl.get("base_anomaly_resist", 0)
+                
+                total_electro += a_data.get("electro_resist", b_ar)
+                total_termo += a_data.get("termo_resist", b_ar)
+                total_chemical += a_data.get("chemical_resist", b_ar)
+                total_radiation += a_data.get("radiation_resist", b_ar)
+                
+                for m_id in a_data.get("setup_anomaly_mods", []):
+                    m_tmpl = items_lib.get(m_id, {})
+                    add_res = m_tmpl.get("add_resist", {})
+                    total_electro += add_res.get("electro_resist", 0)
+                    total_termo += add_res.get("termo_resist", 0)
+                    total_chemical += add_res.get("chemical_resist", 0)
+                    total_radiation += add_res.get("radiation_resist", 0)
+
+            # Расчет модификаторов шлема и маски
+            for slot_h in ["head_slot", "mask_slot"]:
+                h_uid = eq.get(slot_h)
+                if h_uid and h_uid in unique_bag:
+                    h_data = unique_bag[h_uid]
+                    h_tmpl = items_lib.get(h_data.get("template", h_uid), {})
+                    
+                    total_electro += h_data.get("electro_resist", h_tmpl.get("electro_resist", 0))
+                    total_termo += h_data.get("termo_resist", h_tmpl.get("termo_resist", 0))
+                    total_chemical += h_data.get("chemical_resist", h_tmpl.get("chemical_resist", 0))
+                    total_radiation += h_data.get("radiation_resist", h_tmpl.get("radiation_resist", 0))
+                    total_psy += h_data.get("psy_resist", h_tmpl.get("psy_resist", 0))
+                    
+                    for mod_id in h_data.get("helmet_modifications", []):
+                        m_tmpl = items_lib.get(mod_id, {})
+                        mod_stats = m_tmpl.get("modificators", {})
+                        total_electro += mod_stats.get("electro_resist", 0)
+                        total_termo += mod_stats.get("termo_resist", 0)
+                        total_chemical += mod_stats.get("chemical_resist", 0)
+                        total_radiation += mod_stats.get("radiation_resist", 0)
+                        total_psy += mod_stats.get("psy_resist", 0)
+
             def get_slot_status(slot_key: str) -> str:
                 item_u_id = eq.get(slot_key)
-                if not item_u_id: return "• *Слот пуст*"
+                if not item_u_id: return "*Слот пуст*"
                 
                 item_info = unique_bag.get(item_u_id, {})
                 template_id = item_info.get("template", item_u_id)
                 item_template = items_lib.get(template_id, {})
                 
                 name = item_info.get("username") or item_template.get("name", template_id)
-                durability = f" [{item_info['durability']}/10]" if "durability" in item_info else ""
+                i_type = item_info.get("type") or item_template.get("type")
+                
+                durability_str = ""
+                
+                # Подсчет ПБ для шлемов и масок на кукле
+                if i_type in ["head_armor", "head_mask"]:
+                    raw_ap = item_info.get("armor_points", item_template.get("base_armor_points", 0))
+                    cur_ap = raw_ap[0] if isinstance(raw_ap, list) else raw_ap
+                    max_ap = raw_ap[1] if isinstance(raw_ap, list) else raw_ap
+                    
+                    for mod_id in item_info.get("helmet_modifications", []):
+                        bonus_ap = items_lib.get(mod_id, {}).get("modificators", {}).get("armor_points", 0)
+                        cur_ap += bonus_ap
+                        max_ap += bonus_ap
+                        
+                    durability_str = f" *[{cur_ap}/{max_ap} ПБ]*"
+                
+                # Подсчет ПБ для комбинезона на кукле
+                elif i_type == "armor":
+                    suit_factor = item_info.get("durability", 10) / 10.0
+                    armor_pts = list(item_info.get("armor_points", [0, 0]))
+                    
+                    cur_ap = int(armor_pts[0] * suit_factor)
+                    max_ap = armor_pts[1]
+                    
+                    if item_info.get("plate"):
+                        p_pts = unique_bag.get(item_info["plate"], {}).get("armor_points", [0, 0])
+                        cur_ap += p_pts[0]
+                        max_ap += p_pts[1]
+                        
+                    durability_str = f" *[{cur_ap}/{max_ap} ПБ]*"
+                
+                # Для оружия и других предметов оставляем стандартный вывод прочности
+                elif "durability" in item_info:
+                    durability_str = f" *[{item_info['durability']}/10]*"
                 
                 if slot_key == "armor_slot" and item_info.get("plate"):
                     p_name = items_lib.get(item_info["plate"], {}).get("name", item_info["plate"])
-                    return f"• **{name}**{durability} (Плита: {p_name})"
-                return f"• **{name}**{durability}"
+                    return f"**{name}**{durability_str}\n(Плита: {p_name})"
+                return f"**{name}**{durability_str}"
 
-            slots_desc = (
-                f"**Оружие в первом слоте:**\n{get_slot_status('weapon_slot')}\n\n"
-                f"**Оружие во втором слоте:**\n{get_slot_status('weapon_slot_2')}\n\n"
-                f"**Холодное оружие:**\n{get_slot_status('melee_slot')}\n\n"
-                f"**Комбинезон:**\n{get_slot_status('armor_slot')}\n\n"
-                f"**Шлем:**\n{get_slot_status('head_slot')}\n\n"
-                f"**Противогаз:**\n{get_slot_status('mask_slot')}\n\n"
-                f"**Детектор аномалий:**\n{get_slot_status('detector_anomaly_slot')}\n\n"
-                f"**Детектор артефактов:**\n{get_slot_status('detector_artefact_slot')}\n\n"
-                f"**Прибор на глаза (ПНВ):**\n{get_slot_status('eyes_slot')}\n\n"
-                f"**Активные наушники:**\n{get_slot_status('ears_slot')}"
+            desc_text = (
+                f"Электрозащита: +`{total_electro}`\n"
+                f"Термозащита: +`{total_termo}`\n"
+                f"Химзащита: +`{total_chemical}`\n" 
+                f"Рад. защита: +`{total_radiation}`\n"
+                f"Пси-защита: +`{total_psy}`"
             )
-            
-            embed = disnake.Embed(title=f"Экипировка персонажа — {char_name}", description=slots_desc, color=disnake.Color.red())
+
+            embed = disnake.Embed(title=f"Экипировка персонажа — {char_name}", description=desc_text, color=disnake.Color.red())
+
+            # Порядок вывода полей согласно запрашиваемой структуре сетки
+            layout_slots = [
+                ("mask_slot", "Противогаз"),
+                ("head_slot", "Шлем"),
+                ("ears_slot", "Активные наушники"),
+                
+                ("weapon_slot", "Оружие I"),
+                ("armor_slot", "Комбинезон"),
+                ("weapon_slot_2", "Оружие II"),
+                
+                ("melee_slot", "Холодное оружие"),
+                ("eyes_slot", "Прибор на глаза (ПНВ)"),
+                ("dummy", "dummy"), # Невидимая заглушка для переноса строки
+                
+                ("detector_anomaly_slot", "Детектор аномалий"),
+                ("detector_artefact_slot", "Детектор артефактов")
+            ]
+
+            for slot_key, slot_label in layout_slots:
+                if slot_key == "dummy":
+                    embed.add_field(name="\u200b", value="\u200b", inline=True)
+                else:
+                    embed.add_field(name=slot_label, value=get_slot_status(slot_key), inline=True)
 
             slot_names_readable = {
                 "weapon_slot": "Оружие в первом слоте", "weapon_slot_2": "Оружие во втором слоте", 
@@ -2305,6 +2642,31 @@ class PlayerInventoryMenu(disnake.ui.View):
                     btn_unequip = disnake.ui.Button(label="Снять в рюкзак", style=disnake.ButtonStyle.red, custom_id="btn_unequip", row=3)
                     btn_unequip.callback = self.btn_unequip_callback
                     self.add_item(btn_unequip)
+
+                    # Получаем тип предмета для отображения кнопки атаки
+                    sel_uid = eq[self.selected_slot]
+                    sel_item_info = unique_bag.get(sel_uid, {})
+                    sel_template = items_lib.get(sel_item_info.get("template", sel_uid), {})
+                    sel_type = sel_item_info.get("type") or sel_template.get("type")
+
+                    if sel_type in ["weapon", "melee_weapon"]:
+                        btn_use_wep = disnake.ui.Button(label="Использовать оружие", style=disnake.ButtonStyle.red, custom_id="btn_use_wep", row=3)
+                        btn_use_wep.callback = self.btn_use_weapon_callback
+                        self.add_item(btn_use_wep)
+
+                        # Проверяем доступность автоогня (уникальные свойства или шаблон)
+                        auto_fire_state = sel_item_info.get("auto_fire_override") or sel_template.get("auto_fire", "no")
+                        
+                        # Проверяем модификаторы оружия на наличие флага mod_auto_fire
+                        for mod_id in sel_item_info.get("modifications", []):
+                            mod_tmpl = items_lib.get(mod_id, {})
+                            if mod_tmpl.get("mod_auto_fire") is not None:
+                                auto_fire_state = mod_tmpl["mod_auto_fire"]
+
+                        if sel_type == "weapon" and auto_fire_state == "yes":
+                            btn_auto_fire = disnake.ui.Button(label="Автоматический огонь", style=disnake.ButtonStyle.red, custom_id="btn_auto_fire", row=3)
+                            btn_auto_fire.callback = self.btn_auto_fire_callback
+                            self.add_item(btn_auto_fire)
 
 # ========================================== ВКЛАДКА: РЮКЗАК ==========================================
         elif self.current_tab == "backpack":
@@ -2376,12 +2738,44 @@ class PlayerInventoryMenu(disnake.ui.View):
                         name = f"{name} ({mod_name})"
 
                 durability_str = ""
-                if "durability" in u_data:
+                # Строго запрещаем плитам и защите конечностей отображать durability-маркер
+                if "durability" in u_data and i_type not in ["armor", "head_armor", "head_mask", "armor_plate", "add_armor"]:
                     durability_str = f" *[{u_data['durability']}/10]*"
-                elif "armor_points" in u_data and isinstance(u_data["armor_points"], list) and len(u_data["armor_points"]) >= 2:
-                    durability_str = f" *[{u_data['armor_points'][0]}/{u_data['armor_points'][1]} ПБ]*"
+                else:
+                    # Динамический сбор ПБ для брони и шлемов
+                    if i_type in ["head_armor", "head_mask"]:
+                        raw_ap = u_data.get("armor_points", items_lib.get(template_id, {}).get("base_armor_points", 0))
+                        cur_ap = raw_ap[0] if isinstance(raw_ap, list) else raw_ap
+                        max_ap = raw_ap[1] if isinstance(raw_ap, list) else raw_ap
+                        
+                        for mod_id in u_data.get("helmet_modifications", []):
+                            bonus_ap = items_lib.get(mod_id, {}).get("modificators", {}).get("armor_points", 0)
+                            cur_ap += bonus_ap
+                            max_ap += bonus_ap
+                            
+                        durability_str = f" *[{cur_ap}/{max_ap} ПБ]*"
+                        
+                    elif i_type == "armor":
+                        suit_factor = u_data.get("durability", 10) / 10.0
+                        armor_pts = list(u_data.get("armor_points", [0, 0]))
+                        
+                        cur_ap = int(armor_pts[0] * suit_factor)
+                        max_ap = armor_pts[1]
+                        
+                        if u_data.get("plate"):
+                            p_pts = unique_bag.get(u_data["plate"], {}).get("armor_points", [0, 0])
+                            cur_ap += p_pts[0]
+                            max_ap += p_pts[1]
+                            
+                        durability_str = f" *[{cur_ap}/{max_ap} ПБ]*"
+                        
+                    # НОВОЕ: Отображение ПБ для плит и защиты конечностей, лежащих в рюкзаке как отдельные предметы
+                    elif i_type in ["armor_plate", "add_armor"]:
+                        raw_ap = u_data.get("armor_points", items_lib.get(template_id, {}).get("armor_points", [0, 0]))
+                        if isinstance(raw_ap, list) and len(raw_ap) >= 2:
+                            durability_str = f" *[{raw_ap[0]}/{raw_ap[1]} ПБ]*"
                 
-                raw_backpack_list.append((u_id, f"🔺 **{name}**{durability_str}", i_type))
+                raw_backpack_list.append((u_id, f"**{name}**{durability_str}", i_type))
 
             # --- ПАГИНАЦИЯ И СБОРКА FIELDS (Синхронизировано под жесткий лимит Discord в 25 опций) ---
             items_per_field = 15
@@ -2413,8 +2807,8 @@ class PlayerInventoryMenu(disnake.ui.View):
                 field_1 = [x[1] for x in page_items[0:items_per_field]]
                 field_2 = [x[1] for x in page_items[items_per_field:items_per_page]]
                 
-                if field_1: embed.add_field(name="📋 Секция рюкзака I", value="\n".join(field_1), inline=False)
-                if field_2: embed.add_field(name="📋 Секция рюкзака II", value="\n".join(field_2), inline=False)
+                if field_1: embed.add_field(name="Секция рюкзака I", value="\n".join(field_1), inline=False)
+                if field_2: embed.add_field(name="Секция рюкзака II", value="\n".join(field_2), inline=False)
             else:
                 embed.description += "\n\n*В рюкзаке не найдено предметов данной категории.*"
 
@@ -2422,14 +2816,14 @@ class PlayerInventoryMenu(disnake.ui.View):
 
             # --- СЕЛЕКТОР ФИЛЬТРОВ (Статический, красивый и укрупненный) ---
             filter_options = [
-                disnake.SelectOption(label="Все категории", value="all", emoji="🎒"),
-                disnake.SelectOption(label="Оружие и ножи", value="weaponry", emoji="🔫"),
-                disnake.SelectOption(label="Боеприпасы и гранаты", value="ammo_grenades", emoji="📦"),
-                disnake.SelectOption(label="Медицина и провизия", value="medicine_food", emoji="💉"),
-                disnake.SelectOption(label="Костюмы и шлемы", value="armor_suits", emoji="👕"),
-                disnake.SelectOption(label="Модификации брони", value="armor_mods", emoji="🛠️"),
-                disnake.SelectOption(label="Детекторы и приборы", value="electronics", emoji="📟"),
-                disnake.SelectOption(label="Крафт / Трофеи / Нарратив", value="craft_narrative", emoji="🧬")
+                disnake.SelectOption(label="Все категории", value="all"),
+                disnake.SelectOption(label="Оружие и ножи", value="weaponry"),
+                disnake.SelectOption(label="Боеприпасы и гранаты", value="ammo_grenades"),
+                disnake.SelectOption(label="Медицина и провизия", value="medicine_food"),
+                disnake.SelectOption(label="Костюмы и шлемы", value="armor_suits"),
+                disnake.SelectOption(label="Модификации брони", value="armor_mods"),
+                disnake.SelectOption(label="Детекторы и приборы", value="electronics"),
+                disnake.SelectOption(label="Крафт / Трофеи / Нарратив", value="craft_narrative")
             ]
 
             filter_select = disnake.ui.Select(
@@ -2542,6 +2936,262 @@ class PlayerInventoryMenu(disnake.ui.View):
             # Аварийный фоллбэк на случай непредвиденных обстоятельств
             await inter.response.edit_message(content="Возврат...", embed=None, view=self.parent_view)
 
+    def roll_exploding_dice(self, sides: int, direction: str):
+        """Оригинальный расчет взрывающихся кубиков"""
+        import random
+        rolls = []
+        while True:
+            roll = random.randint(1, sides)
+            rolls.append(roll)
+            if (direction == "up" and roll < sides) or (direction == "down" and roll > 1):
+                break
+        return sum(rolls), rolls
+
+    async def btn_use_weapon_callback(self, inter: disnake.MessageInteraction):
+        """Боевое применение оружия из слотов экипировки куклы персонажа"""
+        if inter.author.id != self.interactor_id: return
+        await inter.response.defer()
+
+        import random
+
+        # Загрузка конфигурационных файлов и библиотек
+        inv_data = await self.load_json_file(self.inventory_path)
+        items_lib = await self.load_json_file(self.items_lib_path)
+        
+        traits_lib = {}
+        if os.path.exists("chars_data/traits_lib.json"):
+            async with aiofiles.open("chars_data/traits_lib.json", "r", encoding="utf-8") as f:
+                traits_lib = json.loads(await f.read())
+                
+        effects_lib = {}
+        if os.path.exists("chars_data/effects_lib.json"):
+            async with aiofiles.open("chars_data/effects_lib.json", "r", encoding="utf-8") as f:
+                effects_lib = json.loads(await f.read())
+
+        stats_path = os.path.join(self.folder_path, "char_stats.json")
+        async with aiofiles.open(stats_path, "r", encoding="utf-8") as f:
+            skills_data = json.loads(await f.read())
+
+        char_name = skills_data[0]["char_name"]
+
+        # Идентификация предмета в выбранном слоте куклы
+        eq = inv_data.get("equipment", {})
+        u_id = eq.get(self.selected_slot)
+        unique_bag = inv_data.get("inventory", {}).get("unique", {})
+        
+        u_data = unique_bag.get(u_id, {})
+        item_template = items_lib.get(u_data.get("template", u_id), {})
+        item_type = u_data.get("type") or item_template.get("type")
+        weapon_name = u_data.get("username") or item_template.get("name", u_id)
+
+        # Маппинг категорий оружия на ID навыков
+        selected_skill = "skill_basetech"
+        if item_type == "melee_weapon":
+            selected_skill = "skill_meleeweapon"
+        else:
+            w_class = item_template.get("weapon_class", "Пистолет")
+            SKILL_MAP = {
+                "Пистолет": "skill_handguns",
+                "Пистолет-пулемёт": "skill_handguns",
+                "Дробовик": "skill_shotguns",
+                "Штурмовая винтовка": "skill_assaultrifle",
+                "Снайперская винтовка": "skill_sniperrifle",
+                "Тяжелое оружие": "skill_heavyweapon",
+            }
+            selected_skill = SKILL_MAP.get(w_class, "skill_handguns")
+
+        if item_type == "melee_weapon":
+            selected_skill = "skill_strength"
+        
+        # Автоматический поиск родительской группы для выбранного навыка
+        selected_group = None
+        for group in skills_data[1:7]:
+            if selected_skill in group:
+                selected_group = group.get("skill_group", [None])[0]
+                break
+
+        # Сбор активных динамических модификаторов по логике из insect.py
+        active_mods = {}
+        source_meta = skills_data[0]
+        combined_sources = source_meta.get("buffs", []) + source_meta.get("debuffs", []) + source_meta.get("positive_traits", []) + source_meta.get("negative_traits", [])
+        
+        for src_id in combined_sources:
+            mods = traits_lib.get(src_id, {}).get("modifiers", []) or effects_lib.get(src_id, {}).get("modifiers", [])
+            for mod in mods:
+                if len(mod) >= 3:
+                    active_mods[mod[1]] = active_mods.get(mod[1], 0) + mod[2]
+
+        # Извлечение характеристик и расчет уровней навыков
+        skill_group_level = 0
+        calculated_level = 0
+        skill_modificator = 0
+        skill_group_modificator = 0
+        skill_group_name = "Неизвестно"
+        display_name = "Неизвестно"
+
+        for group in skills_data[1:7]:
+            group_id = group.get("skill_group", [None])[0]
+            if group_id == selected_group:
+                skill_group_raw = group.get("skill_group", ["unknown", "Неизвестная группа", 0, 0])
+                skill_group_level = skill_group_raw[2] if isinstance(skill_group_raw, list) else 0
+                skill_group_modificator = skill_group_raw[3] if isinstance(skill_group_raw, list) else 0
+                skill_group_modificator += active_mods.get(selected_group, 0)
+                skill_group_name = skill_group_raw[1] if isinstance(skill_group_raw, list) else "Группа"
+                
+            for key, value in group.items():
+                if key == selected_skill:
+                    display_name = value[0] if isinstance(value, list) else key
+                    skill_fp_value = value[1] if isinstance(value, list) and len(value) >= 2 else 0
+                    skill_modificator = value[2] if isinstance(value, list) and len(value) >= 3 else 0
+                    skill_modificator += active_mods.get(selected_skill, 0)
+                    calculated_level = calculate_skill_level(skill_fp_value)
+                    break
+
+        # Базовая сумма до броска кубика
+        base = skill_group_level + calculated_level + skill_modificator + skill_group_modificator
+        dice_roll = random.randint(1, 10)
+        
+        details_list = [
+            f"**Характеристика {skill_group_name}:** {skill_group_level} (база) + {skill_group_modificator} (мод)",
+            f"**Навык {display_name}:** {calculated_level} (ур) + {skill_modificator} (мод)"
+        ]
+
+        total_dice = dice_roll
+        history_str = ""
+        
+        # Логика взрывов кубика d10
+        if dice_roll == 10:
+            total, history = self.roll_exploding_dice(10, "up")
+            total_dice = dice_roll + total
+            history_str = " + " + " + ".join(map(str, history))
+            details_list.append(f"**Первый куб:** {dice_roll}\n**Взрывы (вверх):** {history}")
+        elif dice_roll == 1:
+            dice_roll_down = random.randint(1, 10)
+            details_list.append(f"**Первый куб:** {dice_roll}\n**Куб провала:** {dice_roll_down}")
+            if dice_roll_down == 1:
+                explosions_total, history = self.roll_exploding_dice(10, "down") 
+                total_dice = -(dice_roll + dice_roll_down + explosions_total)
+                history_str = f" - {dice_roll_down} - {' - '.join(map(str, history))}"
+                details_list.append(f"**Взрывы (вниз):** {history}")
+            else:
+                total_dice = -(dice_roll + dice_roll_down)
+                history_str = f" - {dice_roll_down}"
+        else:
+            details_list.append(f"**Значение кубика:** {dice_roll}")
+
+        # Инициализируем точность (для холодного оружия она останется 0)
+        accuracy = 0
+        if item_type == "weapon":
+            base_stats = item_template.get("base_stats", {})
+            accuracy = base_stats.get("accuracy", 0)
+            for mod_id in u_data.get("modifications", []):
+                accuracy += items_lib.get(mod_id, {}).get("base_stats", {}).get("accuracy", 0)
+
+        # Добавляем точность оружия к результату броска навыка
+        final_result = base + total_dice + accuracy
+        char_part = f"{skill_group_level} + {skill_group_modificator} + {calculated_level} + {skill_modificator}"
+        
+        if total_dice >= 0:
+            full_formula = f"{char_part} + {accuracy} + {dice_roll}{history_str} = **=== {final_result} ===**"
+        else:
+            full_formula = f"{char_part} + {accuracy}{history_str} - {dice_roll} = **=== {final_result} ===**"
+
+        # --- СБОР ХАРАКТЕРИСТИК И БРОСОК УРОНА ПО ФОРМУЛЕ Xd6+Y ---
+        stats_lines = []
+        damage_arr = [1, 0]
+        features_lines = []
+
+        # Текстовая особенность самого оружия
+        if item_template.get("text_feature"):
+            features_lines.append(f"• **Основа**: *{item_template['text_feature']}*")
+
+        if item_type == "weapon":
+            base_stats = item_template.get("base_stats", {})
+            damage_arr = list(base_stats.get("damage", [1, 0]))
+            recoil = base_stats.get("recoil", 0)
+            accuracy = base_stats.get("accuracy", 0)
+            grouping = base_stats.get("grouping", 3)
+            reliability = base_stats.get("reliability", 10)
+            max_mag = base_stats.get("max_magazine", 30)
+
+            # Обвесы модифицируют статы и привносят свои особенности
+            for mod_id in u_data.get("modifications", []):
+                m_tmpl = items_lib.get(mod_id, {})
+                m_stats = m_tmpl.get("base_stats", {})
+                m_dmg = m_stats.get("damage", [0, 0])
+                
+                damage_arr[0] += m_dmg[0]
+                damage_arr[1] += m_dmg[1]
+                recoil += m_stats.get("recoil", 0)
+                accuracy += m_stats.get("accuracy", 0)
+                grouping += m_stats.get("grouping", 0)
+                reliability += m_stats.get("reliability", 0)
+                max_mag += m_stats.get("max_magazine", 0)
+
+                if m_tmpl.get("text_feature"):
+                    features_lines.append(f"• **{m_tmpl.get('name', mod_id)}**: *{m_tmpl['text_feature']}*")
+
+            w_durability = u_data.get("durability", 10)
+            rel_penalty = 1 if 2 <= w_durability <= 6 else (2 if w_durability <= 1 else 0)
+            final_rel = max(0, reliability - rel_penalty)
+
+            stats_lines.extend([
+                f"**Класс оружия:** `{item_template.get('weapon_class', 'Пистолет')}`",
+                f"**Точность:** `{accuracy}` | **Кучность:** `{grouping}`",
+                f"**Отдача:** `{recoil}` | **Надежность:** `{final_rel}`",
+                f"**Состояние:** `{w_durability}/10`"
+            ])
+        else:
+            # Для холодного оружия
+            damage_arr = list(item_template.get("damage", [1, 0]))
+
+        # Строгий бросок урона: Xd6 + Y (где X - количество d6 кубов, Y - модификатор)
+        dmg_count = damage_arr[0]
+        dmg_modifier = damage_arr[1]
+        
+        dmg_rolls = [random.randint(1, 6) for _ in range(dmg_count)]
+        dmg_rolls_sum = sum(dmg_rolls)
+        final_damage = dmg_rolls_sum + dmg_modifier
+
+        # Сборка финального боевого интерфейса
+        embed = disnake.Embed(
+            title=f"Применение оружия — {char_name}",
+            description=f"Оружие: **{weapon_name}**",
+            color=disnake.Color.red()
+        )
+        
+        embed.add_field(
+            name=f"Проверка навыка: {display_name}",
+            value=f"Результат: **=== {final_result} ===**\nФормула: {full_formula}\n\n**Расшифровка броска:**\n" + "\n".join(details_list),
+            inline=False
+        )
+        
+        sign_dmg = "+" if dmg_modifier >= 0 else ""
+        embed.add_field(
+            name="Проверка нанесенного урона",
+            value=f"Формула: `{dmg_count}d6{sign_dmg}{dmg_modifier}`\nКубики: `{dmg_rolls}` (Сумма: {dmg_rolls_sum})\nИтоговый урон: **=== {final_damage} ===**",
+            inline=False
+        )
+        
+        if stats_lines:
+            embed.add_field(name="Свойства оружия", value="\n".join(stats_lines), inline=False)
+            
+        if features_lines:
+            embed.add_field(name="Текстовые особенности", value="\n".join(features_lines), inline=False)
+        if item_type == "weapon":   
+            embed.set_image(url="https://media.discordapp.net/attachments/1000404313304207370/1440652895258279946/image.png?ex=6a22a790&is=6a215610&hm=b1914f6edb6be45f7731d4459771ade0687705c35de51cfa57c2680e99b9dc4d&=&format=webp")
+
+        # Отправляем результаты бросков отдельным сообщением в текстовый канал игры
+        await inter.channel.send(embed=embed)
+        
+        # Перерисовываем главное окно куклы игрока
+        await self.send_inventory_window(inter)
+
+    async def btn_auto_fire_callback(self, inter: disnake.MessageInteraction):
+        """Вызов модального окна для ввода количества выстрелов"""
+        if inter.author.id != self.interactor_id: return
+        await inter.response.send_modal(modal=AutoFireModal(self, self.selected_slot))
+
     async def send_item_context_menu(self, inter: disnake.MessageInteraction):
         """Контекстное меню конкретного предмета с выводом динамических характеристик."""
         self.clear_items()
@@ -2562,7 +3212,6 @@ class PlayerInventoryMenu(disnake.ui.View):
         item_type = "medicine"
         weight = 0.0
         
-        from inventory import format_dice_array
         stats_lines = []
         
         # --- СЦЕНАРИЙ А: УНИКАЛЬНЫЙ ПРЕДМЕТ (Оружие, Броня, Шлемы, Детекторы) ---
@@ -2607,15 +3256,29 @@ class PlayerInventoryMenu(disnake.ui.View):
                     if mod_tmpl.get("mod_auto_fire") is not None:
                         auto_fire_state = mod_tmpl["mod_auto_fire"]
                 
+                # Штраф к надежности от текущего износа ствола
+                w_durability = u_data.get('durability', 10)
+                reliability_penalty = 0
+                status_text = "Исправно"
+                if 2 <= w_durability <= 6:
+                    reliability_penalty = 1
+                    status_text = "Повреждено"
+                elif 0 <= w_durability <= 1:
+                    reliability_penalty = 2
+                    status_text = "Сильно повреждено"
+                
+                final_reliability = max(0, reliability - reliability_penalty)
                 readable_mods = [items_lib.get(m, {}).get('name', m) for m in installed_mods] if installed_mods else ["отсутствуют"]
                 
                 stats_lines.extend([
-                    f"**Прочность:** `{u_data.get('durability', 10)}/10`",
+                    f"**Состояние:** `{w_durability}/10`",
                     f"**Класс оружия:** `{item_template.get('weapon_class', 'Пистолет')}`",
                     f"**Автоматический огонь:** `{'Да' if auto_fire_state == 'yes' else 'Нет'}`",
                     f"**Урон оружия:** `{format_dice_array(damage_arr)}`",
-                    f"**Точность:** `{accuracy}` | **Кучность:** `{grouping}`",
-                    f"**Отдача:** `{recoil}` | **Надежность:** `{reliability}`",
+                    f"**Точность:** `{accuracy}`",
+                    f"**Кучность:** `{grouping}`",
+                    f"**Отдача:** `{recoil}`",
+                    f"**Надежность:** `{final_reliability}` ({status_text})",
                     f"**Вместимость магазина:** `{max_mag}`",
                     f"**Установленные модули:** *{', '.join(readable_mods)}*"
                 ])
@@ -2630,8 +3293,33 @@ class PlayerInventoryMenu(disnake.ui.View):
 
             # 3. Специфические свойства: Основа брони / Костюмы (armor)
             elif item_type == "armor":
-                armor_pts = u_data.get("armor_points", [0, 0])
-                add_armor_pts = u_data.get("additional_armor_points", [0, 0])
+                suit_factor = u_data.get("durability", 10) / 10.0
+                
+                armor_pts = list(u_data.get("armor_points", [0, 0]))
+                add_armor_pts = list(u_data.get("additional_armor_points", [0, 0]))
+                
+                # Применяем коэффициент костюма ТОЛЬКО к очкам самого костюма
+                final_armor_cur = int(armor_pts[0] * suit_factor)
+                final_add_armor_cur = int(add_armor_pts[0] * suit_factor)
+                final_armor_max = armor_pts[1]
+                final_add_armor_max = add_armor_pts[1]
+
+                # Суммируем ПБ от установленной бронеплиты напрямую
+                if u_data.get("plate"):
+                    p_card = unique_bag.get(u_data["plate"], {})
+                    p_pts = p_card.get("armor_points", [0, 0])
+                    if isinstance(p_pts, list) and len(p_pts) >= 2:
+                        final_armor_cur += p_pts[0]
+                        final_armor_max += p_pts[1]
+                        
+                # Суммируем ПБ от модулей защиты конечностей напрямую
+                if u_data.get("additional_armor"):
+                    l_card = unique_bag.get(u_data["additional_armor"], {})
+                    l_pts = l_card.get("armor_points", [0, 0])
+                    if isinstance(l_pts, list) and len(l_pts) >= 2:
+                        final_add_armor_cur += l_pts[0]
+                        final_add_armor_max += l_pts[1]
+
                 anom_mods = u_data.get("anomaly_mods", item_template.get("base_anomaly_mods", 6))
                 
                 base_ar = item_template.get("base_anomaly_resist", 0)
@@ -2640,7 +3328,6 @@ class PlayerInventoryMenu(disnake.ui.View):
                 chemical = u_data.get('chemical_resist', base_ar)
                 radiation = u_data.get('radiation_resist', base_ar)
                 
-                # Бонусы от установленных аномальных обшивок
                 setup_anom = u_data.get("setup_anomaly_mods", [])
                 for mod_id in setup_anom:
                     mod_tmpl = items_lib.get(mod_id, {})
@@ -2650,13 +3337,21 @@ class PlayerInventoryMenu(disnake.ui.View):
                     chemical += add_resist.get("chemical_resist", 0)
                     radiation += add_resist.get("radiation_resist", 0)
 
+                # Сопротивления аномалиям зависят от состояния костюма
+                final_electro = int(electro * suit_factor)
+                final_termo = int(termo * suit_factor)
+                final_chemical = int(chemical * suit_factor)
+                final_radiation = int(radiation * suit_factor)
+
                 stats_lines.extend([
-                    f"**Класс защиты (очки брони):** `{armor_pts[0]}/{armor_pts[1]} ПБ`",
+                    f"**Состояние костюма:** `{u_data.get('durability', 10)}/10`",
+                    f"**Класс защиты (очки брони):** `{final_armor_cur}/{final_armor_max} ПБ`",
+                    f"**Защита конечностей:** `{final_add_armor_cur}/{final_add_armor_max} ПБ`",
                     f"**Доступный ДАЗ (Ячейки):** `{anom_mods}`",
-                    f"**Электрозащита:** `+{electro}`",
-                    f"**Термозащита:** `+{termo}`",
-                    f"**Химзащита:** `+{chemical}`",
-                    f"**Рад. защита:** `+{radiation}`"
+                    f"**Электрозащита:** `+{final_electro}`",
+                    f"**Термозащита:** `+{final_termo}`",
+                    f"**Химзащита:** `+{final_chemical}`",
+                    f"**Рад. защита:** `+{final_radiation}`"
                 ])
                 
                 stats_lines.append("\n**Компоненты и модули экипировки:**")
@@ -2666,7 +3361,8 @@ class PlayerInventoryMenu(disnake.ui.View):
                     p_card = unique_bag.get(p_uid, {})
                     p_template = p_card.get("template", p_uid)
                     p_name = p_card.get("username") or items_lib.get(p_template, {}).get("name", p_template)
-                    stats_lines.append(f"• **Бронеплита:** {p_name} `({armor_pts[0]}/{armor_pts[1]} ПБ)`")
+                    p_pts_raw = p_card.get("armor_points", [0, 0])
+                    stats_lines.append(f"• **Бронеплита:** {p_name} `({p_pts_raw[0]}/{p_pts_raw[1]} ПБ)`")
                 else:
                     stats_lines.append("• **Бронеплита:** *Не установлена (Слот пуст)*")
                     
@@ -2675,7 +3371,8 @@ class PlayerInventoryMenu(disnake.ui.View):
                     l_card = unique_bag.get(l_uid, {})
                     l_template = l_card.get("template", l_uid)
                     l_name = l_card.get("username") or items_lib.get(l_template, {}).get("name", l_template)
-                    stats_lines.append(f"• **Защита конечностей:** {l_name} `({add_armor_pts[0]}/{add_armor_pts[1]} ПБ)`")
+                    l_pts_raw = l_card.get("armor_points", [0, 0])
+                    stats_lines.append(f"• **Защита конечностей:** {l_name} `({l_pts_raw[0]}/{l_pts_raw[1]} ПБ)`")
                 else:
                     stats_lines.append("• **Защита конечностей:** *Отсутствует*")
                     
@@ -2711,23 +3408,75 @@ class PlayerInventoryMenu(disnake.ui.View):
 
             # 4. Специфические свойства: Шлемы и Противогазы (head_armor, head_mask)
             elif item_type in ["head_armor", "head_mask"]:
-                b_armor = item_template.get("base_armor_points", 0)
+                helm_factor = u_data.get("durability", 10) / 10.0
+                
+                # Динамическое чтение ПБ: если это массив, берем индекс 0 для текущего, 1 для макс.
+                raw_ap = u_data.get("armor_points", item_template.get("base_armor_points", 0))
+                b_armor_cur = raw_ap[0] if isinstance(raw_ap, list) else raw_ap
+                b_armor_max = raw_ap[1] if isinstance(raw_ap, list) else raw_ap
+                
+                electro = u_data.get('electro_resist', item_template.get('electro_resist', 0))
+                termo = u_data.get('termo_resist', item_template.get('termo_resist', 0))
+                chemical = u_data.get('chemical_resist', item_template.get('chemical_resist', 0))
+                radiation = u_data.get('radiation_resist', item_template.get('radiation_resist', 0))
+                psy = u_data.get('psy_resist', item_template.get('psy_resist', 0))
+                
+                installed_mods = u_data.get("helmet_modifications", [])
+                for mod_id in installed_mods:
+                    mod_tmpl = items_lib.get(mod_id, {})
+                    mod_stats = mod_tmpl.get("modificators", {})
+                    
+                    # Плюсуем броню от модулей к обоим значениям
+                    b_armor_cur += mod_stats.get("armor_points", 0)
+                    b_armor_max += mod_stats.get("armor_points", 0)
+                    electro += mod_stats.get("electro_resist", 0)
+                    termo += mod_stats.get("termo_resist", 0)
+                    chemical += mod_stats.get("chemical_resist", 0)
+                    radiation += mod_stats.get("radiation_resist", 0)
+                    psy += mod_stats.get("psy_resist", 0)
+                
+                # Коэффициент износа влияет на текущее состояние ПБ шлема
+                final_b_armor = b_armor_cur
+                
+                final_electro = int(electro * helm_factor)
+                final_termo = int(termo * helm_factor)
+                final_chemical = int(chemical * helm_factor)
+                final_radiation = int(radiation * helm_factor)
+                final_psy = int(psy * helm_factor)
+
                 stats_lines.extend([
-                    f"**Базовая броня головы:** `{b_armor} ПБ`",
-                    f"**Электрозащита:** `+{u_data.get('electro_resist', item_template.get('electro_resist', 0))}`",
-                    f"**Термозащита:** `+{u_data.get('termo_resist', item_template.get('termo_resist', 0))}`",
-                    f"**Химзащита:** `+{u_data.get('chemical_resist', item_template.get('chemical_resist', 0))}`",
-                    f"**Рад. защита:** `+{u_data.get('radiation_resist', item_template.get('radiation_resist', 0))}`",
-                    f"**Пси-защита:** `+{u_data.get('psy_resist', item_template.get('psy_resist', 0))}`"
+                    f"**Состояние:** `{u_data.get('durability', 10)}/10`",
+                    f"**Броня головы:** `{final_b_armor}/{b_armor_max} ПБ`",
+                    f"**Электрозащита:** `+{final_electro}`",
+                    f"**Термозащита:** `+{final_termo}`",
+                    f"**Химзащита:** `+{final_chemical}`",
+                    f"**Рад. защита:** `+{final_radiation}`",
+                    f"**Пси-защита:** `+{final_psy}`"
                 ])
+                
+                if installed_mods:
+                    readable_mods = [f"`{items_lib.get(m, {}).get('name', m)}`" for m in installed_mods]
+                    stats_lines.append(f"• **Установленные модули:** {', '.join(readable_mods)}")
+                    
                 if item_type == "head_armor":
                     mask_status = "Запрещена" if item_template.get("have_mask") == "yes" else "Разрешена"
                     stats_lines.append(f"**Совместимость с противогазом:** `{mask_status}`")
 
             # 5. Специфические свойства: Бронеплиты и Защита конечностей (armor_plate, add_armor)
             elif item_type in ["armor_plate", "add_armor"]:
-                pts = u_data.get("armor_points", item_template.get("armor_points", [0, 0]))
-                stats_lines.append(f"**Очки брони элемента защиты:** `{pts[0]}/{pts[1]} ПБ`")
+                raw_ap = u_data.get("armor_points", item_template.get("armor_points", [0, 0]))
+                
+                # Конвертация на случай, если в шаблоне ПБ указано числом, а не массивом
+                if isinstance(raw_ap, list) and len(raw_ap) >= 2:
+                    cur_ap, max_ap = raw_ap[0], raw_ap[1]
+                else:
+                    cur_ap = max_ap = raw_ap if isinstance(raw_ap, int) else 0
+                    
+                label = "Состояние бронеплиты" if item_type == "armor_plate" else "Состояние защиты конечностей"
+                stats_lines.append(f"**{label}:** `{cur_ap}/{max_ap} ПБ`")
+                
+                if item_template.get("text_feature"):
+                    stats_lines.append(f"\n**Особенность:** *{item_template['text_feature']}*")
 
             # 6. Специфические свойства: Детекторы и Электроника
             elif item_type == "artefact_detector":
@@ -2803,6 +3552,10 @@ class PlayerInventoryMenu(disnake.ui.View):
                     display_weight += items_lib.get(mod_id, {}).get("weight_per_item", 0.0)
                 for mod_id in u_data.get("setup_anomaly_mods", []):
                     display_weight += items_lib.get(mod_id, {}).get("weight_per_item", 0.0)
+            
+            elif item_type in ["head_armor", "head_mask"]:
+                for mod_id in u_data.get("helmet_modifications", []):
+                    display_weight += items_lib.get(mod_id, {}).get("weight_per_item", 0.0)
 
             # Расчёт веса для контейнеров (учитываем артефакты внутри)
             elif item_type == "artefact_container":
@@ -2868,6 +3621,14 @@ class PlayerInventoryMenu(disnake.ui.View):
                         await menu.send_menu(i)
                     btn_modify_wep.callback = modify_weapon_cb
                     self.add_item(btn_modify_wep)
+                elif item_type in ["head_armor", "head_mask"]:
+                    btn_modify_helm = disnake.ui.Button(label="Мастерская шлемов", style=disnake.ButtonStyle.red, custom_id="ctx_btn_modify_helmet", row=1)
+                    async def modify_helmet_cb(i: disnake.MessageInteraction):
+                        if i.author.id != self.interactor_id: return
+                        menu = HelmetModificationMenu(self)
+                        await menu.send_menu(i)
+                    btn_modify_helm.callback = modify_helmet_cb
+                    self.add_item(btn_modify_helm)
             elif item_type == "artefact_container":
                 btn_mod_box = disnake.ui.Button(label="Тюнинг контейнера", style=disnake.ButtonStyle.red, row=1)
                 async def mod_box_cb(i: disnake.MessageInteraction):
@@ -2875,7 +3636,7 @@ class PlayerInventoryMenu(disnake.ui.View):
                     menu = ContainerStandaloneModMenu(self)
                     await menu.send_menu(i)
                 btn_mod_box.callback = mod_box_cb
-                self.add_item(btn_mod_box)
+                self.add_item(btn_mod_box)   
         else:
             if item_type in ["medicine", "food"]:
                 btn_use = disnake.ui.Button(label="Использовать предмет", style=disnake.ButtonStyle.red, custom_id="ctx_btn_use_static", row=1)
@@ -2940,8 +3701,117 @@ class PlayerInventoryMenu(disnake.ui.View):
         btn_drop.callback = btn_drop_callback
         self.add_item(btn_drop)
 
+            # --- УПРАВЛЕНИЕ ИЗНОСОМ ПРЕДМЕТОВ ---
+        if item_type == "armor":
+            # Кнопки для самого комбинезона
+            btn_rep_suit = disnake.ui.Button(label="Починить костюм", style=disnake.ButtonStyle.red, row=3)
+            btn_dmg_suit = disnake.ui.Button(label="Износ костюма (-1)", style=disnake.ButtonStyle.red, row=3)
+                
+            async def rep_suit_cb(i: disnake.MessageInteraction): await self.change_item_durability(i, item_id, mode="repair", target_type="suit")
+            async def dmg_suit_cb(i: disnake.MessageInteraction): await self.change_item_durability(i, item_id, mode="damage", target_type="suit")
+                
+            btn_rep_suit.callback = rep_suit_cb
+            btn_dmg_suit.callback = dmg_suit_cb
+            self.add_item(btn_rep_suit)
+            self.add_item(btn_dmg_suit)
+
+            # Кнопки для бронеплиты (выводим отдельным рядом, если она установлена)
+            if u_data.get("plate"):
+                btn_rep_plate = disnake.ui.Button(label="Починить плиту", style=disnake.ButtonStyle.red, row=4)
+                btn_dmg_plate = disnake.ui.Button(label="Износ плиты (-1)", style=disnake.ButtonStyle.red, row=4)
+                    
+                async def rep_plate_cb(i: disnake.MessageInteraction): await self.change_item_durability(i, item_id, mode="repair", target_type="plate")
+                async def dmg_plate_cb(i: disnake.MessageInteraction): await self.change_item_durability(i, item_id, mode="damage", target_type="plate")
+                    
+                btn_rep_plate.callback = rep_plate_cb
+                btn_dmg_plate.callback = dmg_plate_cb
+                self.add_item(btn_rep_plate)
+                self.add_item(btn_dmg_plate)
+                    
+        elif item_type in ["weapon", "head_armor", "head_mask", "armor_plate", "add_armor"]:
+            btn_repair = disnake.ui.Button(label="Обслужить / Починить", style=disnake.ButtonStyle.red, row=3)
+            btn_damage = disnake.ui.Button(label="Нанести износ (-1)", style=disnake.ButtonStyle.red, row=3)
+
+            async def repair_cb(i: disnake.MessageInteraction): await self.change_item_durability(i, item_id, mode="repair", target_type="self")
+            async def damage_cb(i: disnake.MessageInteraction): await self.change_item_durability(i, item_id, mode="damage", target_type="self")
+
+            btn_repair.callback = repair_cb
+            btn_damage.callback = damage_cb
+            self.add_item(btn_repair)
+            self.add_item(btn_damage)
+
         if inter.response.is_done(): await inter.edit_original_response(embed=embed, view=self)
         else: await inter.response.edit_message(embed=embed, view=self)
+    
+    async def change_item_durability(self, inter: disnake.MessageInteraction, u_id: str, mode: str, target_type: str = "self"):
+        """Внутренний метод изменения прочности предмета и его вложений."""
+        if inter.author.id != self.interactor_id: return
+
+        inv_data = await self.load_json_file(self.inventory_path)
+        unique_bag = inv_data.get("inventory", {}).get("unique", {})
+        if u_id not in unique_bag: return
+        u_data = unique_bag[u_id]
+        
+        # Определяем UID целевого предмета (база или плита)
+        target_uid = u_id
+        if target_type == "plate" and u_data.get("plate"):
+            target_uid = u_data["plate"]
+
+        if target_uid not in unique_bag: return
+        card = unique_bag[target_uid]
+        
+        # Защита: инициализируем durability, если предмет был создан до внедрения этой механики
+        if "durability" not in card:
+            card["durability"] = 10
+            
+        # Защита: конвертируем статические ПБ шлемов из шаблона в динамический массив внутри карточки игрока
+        item_type = card.get("type")
+        if item_type in ["head_armor", "head_mask"] and "armor_points" not in card:
+            items_lib = await self.load_json_file(self.items_lib_path)
+            item_tmpl = items_lib.get(card.get("template", target_uid), {})
+            base_ap = item_tmpl.get("base_armor_points", item_tmpl.get("armor_points", 0))
+            if base_ap > 0:
+                card["armor_points"] = [base_ap, base_ap]
+
+        # Получаем тип предмета для проверки
+        item_type = card.get("type")
+        if not item_type:
+            items_lib = await self.load_json_file(self.items_lib_path)
+            item_type = items_lib.get(card.get("template", target_uid), {}).get("type")
+
+        # 1. Если предмет - броня или оружие (используют только durability)
+        if item_type in ["armor", "weapon"]:
+            if "durability" not in card: card["durability"] = 10
+            curr_dur = card["durability"]
+            if mode == "repair": card["durability"] = 10
+            elif mode == "damage": card["durability"] = max(0, curr_dur - 1)
+            
+        # 2. Если предмет - шлем (использует и durability, и ПБ напрямую)
+        elif item_type in ["head_armor", "head_mask"]:
+            if "durability" not in card: card["durability"] = 10
+            curr_dur = card["durability"]
+            if mode == "repair": card["durability"] = 10
+            elif mode == "damage": card["durability"] = max(0, curr_dur - 1)
+            
+            if "armor_points" in card and isinstance(card["armor_points"], list) and len(card["armor_points"]) >= 2:
+                curr_ap = card["armor_points"][0]
+                max_ap = card["armor_points"][1]
+                if mode == "repair": card["armor_points"][0] = max_ap
+                elif mode == "damage": card["armor_points"][0] = max(0, curr_ap - 1)
+                
+        # 3. Если предмет - бронеплита или защита конечностей (используют ТОЛЬКО ПБ)
+        elif item_type in ["armor_plate", "add_armor"]:
+            if "armor_points" in card and isinstance(card["armor_points"], list) and len(card["armor_points"]) >= 2:
+                curr_ap = card["armor_points"][0]
+                max_ap = card["armor_points"][1]
+                if mode == "repair": card["armor_points"][0] = max_ap
+                elif mode == "damage": card["armor_points"][0] = max(0, curr_ap - 1)
+
+        async with aiofiles.open(self.inventory_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(inv_data, indent=4, ensure_ascii=False))
+
+        await sync_character_weight_and_effects(self.folder_path)
+        await self.send_item_context_menu(inter)
     
     async def bp_action_select_callback(self, inter: disnake.MessageInteraction):
         if inter.author.id != self.interactor_id: return
@@ -3017,7 +3887,7 @@ class PlayerInventoryMenu(disnake.ui.View):
 
             log_details = []
 
-            # Извлечение и чистка эффектов
+# Извлечение и чистка эффектов
             if item_u_id in unique_bag:
                 u_data = unique_bag[item_u_id]
                 template_id = u_data.get("template", item_u_id)
@@ -3027,7 +3897,6 @@ class PlayerInventoryMenu(disnake.ui.View):
                 
                 effects_to_remove = []
                 
-                # Собираем issued_effects (базовые + моды верстака)
                 if item_type == "armor":
                     base_eff = item_template.get("issued_effects", [])
                     if isinstance(base_eff, str): base_eff = [base_eff]
@@ -3035,7 +3904,18 @@ class PlayerInventoryMenu(disnake.ui.View):
                     if isinstance(dyn_eff, str): dyn_eff = [dyn_eff]
                     effects_to_remove.extend(list(set(base_eff + dyn_eff)))
                 
-                # Стандартные long_effects приборов
+                elif item_type in ["head_armor", "head_mask"]:
+                    base_eff = item_template.get("issued_effect")
+                    if base_eff:
+                        effects_to_remove.append(base_eff)
+                        
+                    for mod_id in u_data.get("helmet_modifications", []):
+                        mod_tmpl = items_lib.get(mod_id, {})
+                        mod_effs = mod_tmpl.get("issued_effect", [])
+                        if isinstance(mod_effs, str):
+                            mod_effs = [mod_effs]
+                        effects_to_remove.extend(mod_effs)
+                
                 long_effects = item_template.get("long_effects", {})
                 if "add" in long_effects:
                     add_targets = long_effects["add"]
@@ -3062,14 +3942,14 @@ class PlayerInventoryMenu(disnake.ui.View):
             async with aiofiles.open(stats_path, "w", encoding="utf-8") as f:
                 await f.write(json.dumps(skills_data, ensure_ascii=False, indent=4))
 
-            with open(self.inventory_path, "w", encoding="utf-8") as f:
-                json.dump(inv_data, f, indent=4, ensure_ascii=False)
+            async with aiofiles.open(self.inventory_path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(inv_data, indent=4, ensure_ascii=False))
 
             # Пересчитываем физический вес персонажа
             await sync_character_weight_and_effects(self.folder_path)
 
             # Передаем уведомление на экран инвентаря, сбрасываем выделение слота
-            self.backpack_notification = "⚙️ **Изменение экипировки персонажа:**\n" + "\n".join(log_details)
+            self.backpack_notification = "**Изменение экипировки персонажа:**\n" + "\n".join(log_details)
             self.selected_slot = None
             self.selected_backpack_item = None
             
@@ -3081,10 +3961,80 @@ class PlayerInventoryMenu(disnake.ui.View):
             await inter.followup.send("❌ Произошла внутренняя ошибка при снятии снаряжения.", ephemeral=True)
 
     async def btn_equip_callback(self, inter: disnake.MessageInteraction):
-        """Ролевой движок экипировки уникальных предметов с динамическим наложением long_effects и issued_effects брони"""
+        """Ролевой движок экипировки (Диспетчер выбора слотов)"""
         if inter.author.id != self.interactor_id: return
 
-        # 1. Загружаем актуальные файлы данных
+        inv_data = await self.load_json_file(self.inventory_path)
+        items_lib = await self.load_json_file(self.items_lib_path)
+        unique_bag = inv_data.get("inventory", {}).get("unique", {})
+        
+        u_id = self.selected_backpack_item
+        if u_id not in unique_bag:
+            self.selected_backpack_item = None
+            return await self.send_inventory_window(inter)
+
+        u_data = unique_bag[u_id]
+        template_id = u_data.get("template", u_id)
+        item_template = items_lib.get(template_id, {})
+        item_type = u_data.get("type") or item_template.get("type")
+
+        # --- НОВОВВЕДЕНИЕ: ПЕРЕХВАТ ОРУЖИЯ И ВЫБОР СЛОТА ---
+        if item_type == "weapon":
+            self.clear_items()
+            
+            wep_name = u_data.get("username") or item_template.get("name", template_id)
+            embed = disnake.Embed(
+                title="Выбор оружейного слота",
+                description=f"В какой слот вы хотите поместить **{wep_name}**?",
+                color=disnake.Color.red()
+            )
+            
+            btn_slot_1 = disnake.ui.Button(label="Первый слот (Основное)", style=disnake.ButtonStyle.red, row=0)
+            btn_slot_2 = disnake.ui.Button(label="Второй слот (Вторичное)", style=disnake.ButtonStyle.red, row=0)
+            btn_cancel = disnake.ui.Button(label="Отмена", style=disnake.ButtonStyle.red, row=1)
+            
+            async def slot1_cb(i: disnake.MessageInteraction):
+                await self._finalize_equip(i, u_id, "weapon_slot")
+                
+            async def slot2_cb(i: disnake.MessageInteraction):
+                await self._finalize_equip(i, u_id, "weapon_slot_2")
+                
+            async def cancel_cb(i: disnake.MessageInteraction):
+                await self.send_item_context_menu(i)
+                
+            btn_slot_1.callback = slot1_cb
+            btn_slot_2.callback = slot2_cb
+            btn_cancel.callback = cancel_cb
+            
+            self.add_item(btn_slot_1)
+            self.add_item(btn_slot_2)
+            self.add_item(btn_cancel)
+            
+            if inter.response.is_done():
+                return await inter.edit_original_response(embed=embed, view=self)
+            else:
+                return await inter.response.edit_message(embed=embed, view=self)
+
+        # Каноничный маппинг для всех остальных предметов
+        SLOT_MAPPING = {
+            "anomaly_detector": "detector_anomaly_slot",
+            "artefact_detector": "detector_artefact_slot",
+            "head_eyes": "eyes_slot",
+            "head_ears": "ears_slot",
+            "melee_weapon": "melee_slot",   
+            "armor": "armor_slot",         
+            "head_armor": "head_slot",     
+            "head_mask": "mask_slot"       
+        }
+
+        if item_type not in SLOT_MAPPING:
+            return await inter.response.send_message("Этот тип предметов нельзя экипировать в active слоты!", ephemeral=True)
+
+        target_slot = SLOT_MAPPING[item_type]
+        await self._finalize_equip(inter, u_id, target_slot)
+
+    async def _finalize_equip(self, inter: disnake.MessageInteraction, u_id: str, target_slot: str):
+        """Непосредственный процесс экипировки и наложения эффектов"""
         inv_data = await self.load_json_file(self.inventory_path)
         items_lib = await self.load_json_file(self.items_lib_path)
         
@@ -3094,13 +4044,6 @@ class PlayerInventoryMenu(disnake.ui.View):
         unique_bag = inv_data.get("inventory", {}).get("unique", {})
         eq_slots = inv_data.setdefault("equipment", {})
         
-        u_id = self.selected_backpack_item
-
-        # Защита: проверяем, существует ли этот уникальный предмет в рюкзаке
-        if u_id not in unique_bag:
-            self.selected_backpack_item = None
-            return await self.send_inventory_window(inter)
-
         u_data = unique_bag[u_id]
         template_id = u_data.get("template", u_id)
         item_template = items_lib.get(template_id, {})
@@ -3108,29 +4051,15 @@ class PlayerInventoryMenu(disnake.ui.View):
         item_type = u_data.get("type") or item_template.get("type")
         name = u_data.get("username") or item_template.get("name", template_id)
 
-        # Каноничный SLOT_MAPPING с правильными ID слотов
-        SLOT_MAPPING = {
-            "anomaly_detector": "detector_anomaly_slot",
-            "artefact_detector": "detector_artefact_slot",
-            "head_eyes": "eyes_slot",
-            "head_ears": "ears_slot",
-            "weapon": "weapon_slot",       
-            "melee_weapon": "melee_slot",   
-            "armor": "armor_slot",         
-            "head_armor": "head_slot",     
-            "head_mask": "mask_slot"       
-        }
-
-        if item_type not in SLOT_MAPPING:
-            return await inter.response.send_message("❌ Этот тип предметов нельзя экипировать в active слоты!", ephemeral=True)
-
-        target_slot = SLOT_MAPPING[item_type]
         old_equipped_uid = eq_slots.get(target_slot)
 
         if old_equipped_uid == u_id:
-            return await inter.response.send_message("🔹 Этот предмет уже экипирован на вашем персонаже!", ephemeral=True)
+            msg = "Этот предмет уже экипирован на вашем персонаже!"
+            if inter.response.is_done():
+                return await inter.followup.send(msg, ephemeral=True)
+            else:
+                return await inter.response.send_message(msg, ephemeral=True)
 
-        # Читаем чарлист персонажа и подгружаем библиотеку эффектов
         async with aiofiles.open(stats_path, "r", encoding="utf-8") as f:
             skills_data = json.loads(await f.read())
             
@@ -3139,15 +4068,13 @@ class PlayerInventoryMenu(disnake.ui.View):
             async with aiofiles.open(effects_lib_path, "r", encoding="utf-8") as f:
                 effects_lib = json.loads(await f.read())
                 
-        source = skills_data[0] # Мета-блок параметров
+        source = skills_data[0]
         if "buffs" not in source: source["buffs"] = []
         if "debuffs" not in source: source["debuffs"] = []
 
         log_details = []
 
-        # =====================================================================================
-        # ШАГ А: СНЯТИЕ СТАРОЙ ВЕЩИ И ОЧИСТКА ЕЁ ЭФФЕКТОВ (Доработан под конструктор брони)
-        # =====================================================================================
+        # ШАГ А: СНЯТИЕ СТАРОЙ ВЕЩИ
         if old_equipped_uid:
             old_u_data = unique_bag.get(old_equipped_uid, {})
             old_template_id = old_u_data.get("template", old_equipped_uid)
@@ -3155,65 +4082,46 @@ class PlayerInventoryMenu(disnake.ui.View):
             old_name = old_u_data.get("username") or old_template.get("name", old_template_id)
             old_type = old_u_data.get("type") or old_template.get("type")
             
-            log_details.append(f"🔄 Снят предмет: **{old_name}** (возвращен в рюкзак).")
-            
-            # Собираем список эффектов, которые нужно снять
+            log_details.append(f"Снят предмет: **{old_name}** (возвращен в рюкзак).")
             effects_to_remove = []
             
-            # 1. Если старая шмотка была броней, собираем её issued_effects (базовые + моды)
             if old_type == "armor":
                 old_base_eff = old_template.get("issued_effects", [])
                 if isinstance(old_base_eff, str): old_base_eff = [old_base_eff]
-                
                 old_dyn_eff = old_u_data.get("issued_effects", [])
                 if isinstance(old_dyn_eff, str): old_dyn_eff = [old_dyn_eff]
-                
                 effects_to_remove.extend(list(set(old_base_eff + old_dyn_eff)))
             
-            # 2. Для приборов и оружия используем стандартный long_effects
             old_long_effects = old_template.get("long_effects", {})
             if "add" in old_long_effects:
                 old_add_targets = old_long_effects["add"]
                 if isinstance(old_add_targets, str): old_add_targets = [old_add_targets]
                 effects_to_remove.extend(old_add_targets)
                 
-            # Чистим собранные эффекты из чарлиста
             for eff_id in set(effects_to_remove):
                 if eff_id in source["buffs"]: source["buffs"].remove(eff_id)
                 if eff_id in source["debuffs"]: source["debuffs"].remove(eff_id)
-                
                 eff_name = effects_lib.get(eff_id, {}).get("name", eff_id)
-                log_details.append(f"❌ Удален эффект снятого снаряжения: `[ {eff_name} ]`")
+                log_details.append(f"Удален эффект снятого снаряжения: `[ {eff_name} ]`")
 
-        # =====================================================================================
-        # ШАГ Б: НАЛОЖЕНИЕ ЭФФЕКТОВ НОВОГО ПРЕДМЕТА (Интегрирован под канон UIMS)
-        # =====================================================================================
+        # ШАГ Б: НАЛОЖЕНИЕ НОВОЙ ВЕЩИ
         effects_to_add = []
-
-        # 1. Если надеваем БРОНЮ, собираем её эффекты из статического шаблона И динамической карточки экземпляра
         if item_type == "armor":
             base_eff = item_template.get("issued_effects", [])
             if isinstance(base_eff, str): base_eff = [base_eff]
-            
-            # Эффекты модов, сохранённые в карточке брони
             dyn_eff = u_data.get("issued_effects", [])
             if isinstance(dyn_eff, str): dyn_eff = [dyn_eff]
-            
             effects_to_add.extend(list(set(base_eff + dyn_eff)))
 
-        # 2. Для остального снаряжения (приборы и т.д.)
         new_long_effects = item_template.get("long_effects", {})
         if "add" in new_long_effects:
             new_add_targets = new_long_effects["add"]
             if isinstance(new_add_targets, str): new_add_targets = [new_add_targets]
             effects_to_add.extend(new_add_targets)
             
-        # Накладываем эффекты на персонажа
         for eff_id in set(effects_to_add):
             if not eff_id: continue
-            # Избегаем дублирования эффектов
-            if eff_id in source["buffs"] or eff_id in source["debuffs"]:
-                continue
+            if eff_id in source["buffs"] or eff_id in source["debuffs"]: continue
                 
             eff_data = effects_lib.get(eff_id, {})
             eff_name = eff_data.get("name", eff_id)
@@ -3221,31 +4129,36 @@ class PlayerInventoryMenu(disnake.ui.View):
             
             if is_buff:
                 source["buffs"].append(eff_id)
-                log_details.append(f"🟢 Наложен бафф экипировки: `[ {eff_name} ]`")
+                log_details.append(f"Наложен бафф экипировки: `[ {eff_name} ]`")
             else:
                 source["debuffs"].append(eff_id)
-                log_details.append(f"🔴 Наложен дебафф экипировки: `[ {eff_name} ]`")
+                log_details.append(f"Наложен дебафф экипировки: `[ {eff_name} ]`")
 
-        # 4. ФИЗИЧЕСКАЯ УСТАНОВКА В СЛОТ И СОХРАНЕНИЕ ХАРАКТЕРИСТИК
+        # СОХРАНЕНИЕ
         eq_slots[target_slot] = u_id
-        log_details.append(f"📟 Экипирован предмет: **{name}** в слот `{target_slot}`.")
+        
+        # Получаем красивое имя слота для вывода в лог
+        slot_names_readable = {
+            "weapon_slot": "Первый слот оружия", "weapon_slot_2": "Второй слот оружия", 
+            "melee_slot": "Холодное оружие", "armor_slot": "Комбинезон", "head_slot": "Шлем", 
+            "mask_slot": "Противогаз", "detector_anomaly_slot": "Детектор аномалий", 
+            "detector_artefact_slot": "Детектор артефактов", "eyes_slot": "Прибор на глаза", "ears_slot": "Наушники"
+        }
+        readable_slot = slot_names_readable.get(target_slot, target_slot)
+        
+        log_details.append(f"Экипирован предмет: **{name}** в `{readable_slot}`.")
 
-        # Сохраняем обновленный чарлист персонажа
         async with aiofiles.open(stats_path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(skills_data, ensure_ascii=False, indent=4))
 
-        # Сохраняем обновленный инвентарь (equipment)
-        with open(self.inventory_path, "w", encoding="utf-8") as f:
-            json.dump(inv_data, f, indent=4, ensure_ascii=False)
+        async with aiofiles.open(self.inventory_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(inv_data, indent=4, ensure_ascii=False))
 
-        # 5. ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ ВЕСА И ДЕБАФФОВ НАГРУЗКИ
         await sync_character_weight_and_effects(self.folder_path)
 
-        # 6. ВЫВОД БЕСШОВНОГО СТАТУСА УСПЕХА В РЮКЗАК
-        self.backpack_notification = "⚙️ **Изменение экипировки персонажа:**\n" + "\n".join(log_details)
-
-        # Сбрасываем фокус осмотра предмета и красиво возвращаем сталкера к общему списку рюкзака
+        self.backpack_notification = "**Изменение экипировки персонажа:**\n" + "\n".join(log_details)
         self.selected_backpack_item = None
+        
         await self.send_inventory_window(inter)
 
     async def btn_use_consumable_callback(self, inter: disnake.MessageInteraction):
@@ -3337,21 +4250,21 @@ class PlayerInventoryMenu(disnake.ui.View):
             old_hp = source.setdefault("heal_points", [0, 0])[0]
             new_hp = min(max_heal, old_hp + hp_change)
             source["heal_points"][0] = new_hp
-            changelog.append(f"❤️ **Здоровье:** `+{new_hp - old_hp}` [{hp_log}] ➔ `{new_hp}/{max_heal}`")
+            changelog.append(f"**Здоровье:** `+{new_hp - old_hp}` [{hp_log}] ➔ `{new_hp}/{max_heal}`")
 
         if "add_mp" in use_effects:
             mp_change, mp_log = roll_pool_effect(use_effects["add_mp"])
             old_mp = source.setdefault("mental_points", [0, 0])[0]
             new_mp = min(max_mental, old_mp + mp_change)
             source["mental_points"][0] = new_mp
-            changelog.append(f"🧠 **Психика:** `+{new_mp - old_mp}` [{mp_log}] ➔ `{new_mp}/{max_mental}`")
+            changelog.append(f"**Психика:** `+{new_mp - old_mp}` [{mp_log}] ➔ `{new_mp}/{max_mental}`")
 
         if "add_rp" in use_effects:
             rp_change, rp_log = roll_pool_effect(use_effects["add_rp"])
             old_rp = source.setdefault("radiation_points", [0, 0])[0]
             new_rp = max(0, old_rp - rp_change)
             source["radiation_points"][0] = new_rp
-            changelog.append(f"☢️ **Радиация:** `-{old_rp - new_rp}` [{rp_log}] ➔ `{new_rp}/{max_radiation}`")
+            changelog.append(f"**Радиация:** `-{old_rp - new_rp}` [{rp_log}] ➔ `{new_rp}/{max_radiation}`")
 
         # --- 2. ОБРАБОТКА LONG_EFFECTS (ДОБАВЛЕНИЕ / ИЗЪЯТИЕ СТАТУСОВ) ---
         if "buffs" not in source: source["buffs"] = []
@@ -3397,10 +4310,10 @@ class PlayerInventoryMenu(disnake.ui.View):
                 
                 if is_buff:
                     source["buffs"].append(effect_id)
-                    changelog.append(f"🟢 **Получен бафф:** `[ {eff_name} ]`")
+                    changelog.append(f"**Получен бафф:** `[ {eff_name} ]`")
                 else:
                     source["debuffs"].append(effect_id)
-                    changelog.append(f"🔴 **Получен дебафф:** `[ {eff_name} ]`")
+                    changelog.append(f"**Получен дебафф:** `[ {eff_name} ]`")
 
         # --- 3. СОХРАНЕНИЕ ДАННЫХ И СУБ-ВЫЗОВЫ ---
         async with aiofiles.open(stats_path, "w", encoding="utf-8") as f:
@@ -3413,8 +4326,8 @@ class PlayerInventoryMenu(disnake.ui.View):
         # Выводим отчет в рюкзак
         effects_summary = "\n".join(changelog) if changelog else "• *Особых изменений пулов и статусов нет*"
         self.backpack_notification = (
-            f"💊 **Вы использовали предмет:** **{name}**.\n"
-            f"📊 **Изменения состояния персонажа:**\n{effects_summary}"
+            f"**Вы использовали предмет:** **{name}**.\n"
+            f"**Изменения состояния персонажа:**\n{effects_summary}"
         )
 
         self.selected_backpack_item = None
@@ -3537,7 +4450,7 @@ class UniversalNPCShopView(disnake.ui.View):
             self.purchase_notification = None # Сразу стираем, чтобы не висело при следующем перелистывании страницы
 
         embed = disnake.Embed(
-            title=f"🏪 Торговец — Магазин Зоны",
+            title=f"Магазин",
             description=f"{notification_text}" # Выводим плашку успеха на самый верх описания
                         f"Клиент: **{char_name}** | Баланс: `{current_rubles} RU`\n"
                         f"Категория товаров: `*{readable_filter}*`\n\n"
@@ -3563,8 +4476,8 @@ class UniversalNPCShopView(disnake.ui.View):
                 else:
                     price_list_2.append(item_line)
 
-            if price_list_1: embed.add_field(name="📋 Прейскурант (Часть I)", value="\n".join(price_list_1), inline=False)
-            if price_list_2: embed.add_field(name="📋 Прейскурант (Часть II)", value="\n".join(price_list_2), inline=False)
+            if price_list_1: embed.add_field(name="Прейскурант (Часть I)", value="\n".join(price_list_1), inline=False)
+            if price_list_2: embed.add_field(name="Прейскурант (Часть II)", value="\n".join(price_list_2), inline=False)
         else:
             embed.description += "\n\n*У торговца нет товаров в данной категории.*"
 
@@ -3572,15 +4485,15 @@ class UniversalNPCShopView(disnake.ui.View):
 
         # --- СЕЛЕКТОР КАТЕГОРИЙ (Твоя укрупненная сортировка) ---
         filter_options = [
-            disnake.SelectOption(label="Все категории", value="all", emoji="🎒"),
-            disnake.SelectOption(label="Оружие и ножи", value="weaponry", emoji="🔫"),
-            disnake.SelectOption(label="Боеприпасы и гранаты", value="ammo_grenades", emoji="📦"),
-            disnake.SelectOption(label="Медицина и провизия", value="medicine_food", emoji="💉"),
-            disnake.SelectOption(label="Костюмы и шлемы", value="armor_suits", emoji="👕"),
-            disnake.SelectOption(label="Модификации брони", value="armor_mods", emoji="🛠️"),
-            disnake.SelectOption(label="Защитные плиты / Накладки", value="protection_elements", emoji="🛡️"),
-            disnake.SelectOption(label="Детекторы и приборы", value="electronics", emoji="📟"),
-            disnake.SelectOption(label="Крафт / Трофеи / Нарратив", value="craft_narrative", emoji="🧬")
+            disnake.SelectOption(label="Все категории", value="all"),
+            disnake.SelectOption(label="Оружие и ножи", value="weaponry"),
+            disnake.SelectOption(label="Боеприпасы и гранаты", value="ammo_grenades"),
+            disnake.SelectOption(label="Медицина и провизия", value="medicine_food"),
+            disnake.SelectOption(label="Костюмы и шлемы", value="armor_suits"),
+            disnake.SelectOption(label="Модификации брони", value="armor_mods"),
+            disnake.SelectOption(label="Защитные плиты / Накладки", value="protection_elements"),
+            disnake.SelectOption(label="Детекторы и приборы", value="electronics"),
+            disnake.SelectOption(label="Крафт / Трофеи / Нарратив", value="craft_narrative")
         ]
         
         filter_select = disnake.ui.Select(placeholder="Выбрать другую категорию товаров...", options=filter_options, custom_id="shop_filter_select", row=2)
@@ -3738,8 +4651,26 @@ class ArmorModificationMenu(disnake.ui.View):
         
         # Сбор текущего состояния костюма
         name = armor_card.get("username", "Костюм")
-        armor_pts = armor_card.get("armor_points", [0, 0])
-        add_armor_pts = armor_card.get("additional_armor_points", [0, 0])
+        
+        # Создаем копии списков для динамического расчета
+        armor_pts = list(armor_card.get("armor_points", [0, 0]))
+        add_armor_pts = list(armor_card.get("additional_armor_points", [0, 0]))
+        
+        # Добавляем ПБ от установленной бронеплиты
+        if armor_card.get("plate"):
+            p_card = unique_bag.get(armor_card["plate"], {})
+            p_pts = p_card.get("armor_points", [0, 0])
+            if isinstance(p_pts, list) and len(p_pts) >= 2:
+                armor_pts[0] += p_pts[0]
+                armor_pts[1] += p_pts[1]
+                
+        # Добавляем ПБ от модулей защиты конечностей
+        if armor_card.get("additional_armor"):
+            l_card = unique_bag.get(armor_card["additional_armor"], {})
+            l_pts = l_card.get("armor_points", [0, 0])
+            if isinstance(l_pts, list) and len(l_pts) >= 2:
+                add_armor_pts[0] += l_pts[0]
+                add_armor_pts[1] += l_pts[1]
         
         # Подсчет аномальной защиты
         template_id = armor_card.get("template")
@@ -3806,8 +4737,8 @@ class ArmorModificationMenu(disnake.ui.View):
         # Кнопки управления слотами
         btn_plate = disnake.ui.Button(label="Бронеплита", style=disnake.ButtonStyle.red, row=0)
         btn_limbs = disnake.ui.Button(label="Защита конечностей", style=disnake.ButtonStyle.red, row=0)
-        btn_mech = disnake.ui.Button(label="Мех. Модификации", style=disnake.ButtonStyle.red, row=1)
-        btn_anom = disnake.ui.Button(label="Аномальная защита", style=disnake.ButtonStyle.red, row=1)
+        btn_mech = disnake.ui.Button(label="Навесные модификации", style=disnake.ButtonStyle.red, row=1)
+        btn_anom = disnake.ui.Button(label="АЗ-обшивки", style=disnake.ButtonStyle.red, row=1)
         btn_containers = disnake.ui.Button(label="Контейнеры артефактов", style=disnake.ButtonStyle.red, row=2)
         btn_exit = disnake.ui.Button(label="Выйти из верстака", style=disnake.ButtonStyle.red, row=2)
 
@@ -3887,7 +4818,7 @@ class ArmorModificationMenu(disnake.ui.View):
             btn_demount.callback = demount_cb
             self.add_item(btn_demount)
 
-        slot_names = {"plate": "Бронеплита", "additional_armor": "Защита конечностей", "mods": "Мех. модификация", "anomaly": "Аномальная обшивка"}
+        slot_names = {"plate": "Бронеплита", "additional_armor": "Защита конечностей", "mods": "Навесные модификации", "anomaly": "АЗ-обшивка"}
         embed = disnake.Embed(title=f"Действие со слотом: {slot_names.get(slot)}", description="Выберите, что необходимо сделать с данным узлом комбинезона.", color=disnake.Color.red())
         await inter.response.edit_message(content=None, embed=embed, view=self)
 
@@ -3935,6 +4866,100 @@ class ArmorModificationMenu(disnake.ui.View):
         self.add_item(select)
         
         await inter.response.edit_message(content="Выберите устанавливаемый элемент из инвентаря:", embed=None, view=self)
+    
+    async def execute_mount_component(self, inter: disnake.MessageInteraction):
+        """Монтаж выбранной детали из рюкзака на бронекостюм."""
+        if inter.author.id != self.inv_view.interactor_id: 
+            return
+
+        target_id = inter.values[0]
+        slot = self.current_slot
+        armor_uid = self.inv_view.selected_backpack_item
+
+        inv_data = await self.inv_view.load_json_file(self.inv_view.inventory_path)
+        unique_bag = inv_data.get("inventory", {}).get("unique", {})
+        static_bag = inv_data.get("inventory", {}).get("static", {})
+        armor_card = unique_bag.get(armor_uid)
+
+        if not armor_card:
+            return await inter.response.send_message("Модифицируемый предмет не найден в базе данных.", ephemeral=True)
+
+        if slot in ["plate", "additional_armor"]:
+            # Снимаем старую деталь, если она была установлена
+            old_uid = armor_card.get(slot)
+            if old_uid and old_uid in unique_bag:
+                unique_bag[old_uid]["holder_armor_uid"] = None
+
+            # Привязываем новую уникальную деталь
+            if target_id in unique_bag:
+                armor_card[slot] = target_id
+                unique_bag[target_id]["holder_armor_uid"] = armor_uid
+        
+        elif slot == "mods":
+            if static_bag.get(target_id, 0) <= 0:
+                return await inter.response.send_message("Компонент отсутствует в вашем рюкзаке.", ephemeral=True)
+            static_bag[target_id] -= 1
+            if static_bag[target_id] <= 0:
+                del static_bag[target_id]
+            armor_card.setdefault("setup_mods", []).append(target_id)
+            
+        elif slot == "anomaly":
+            if static_bag.get(target_id, 0) <= 0:
+                return await inter.response.send_message("Обшивка отсутствует в вашем рюкзаке.", ephemeral=True)
+            static_bag[target_id] -= 1
+            if static_bag[target_id] <= 0:
+                del static_bag[target_id]
+            armor_card.setdefault("setup_anomaly_mods", []).append(target_id)
+
+        # Асинхронное сохранение обновленного инвентаря
+        async with aiofiles.open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(inv_data, indent=4, ensure_ascii=False))
+
+        # Синхронизация параметров веса и эффектов
+        await sync_character_weight_and_effects(self.inv_view.folder_path)
+        await self.send_menu(inter)
+
+    async def execute_demount_component(self, inter: disnake.MessageInteraction):
+        """Демонтаж компонента из узла брони и возвращение его игроку."""
+        if inter.author.id != self.inv_view.interactor_id: 
+            return
+
+        slot = self.current_slot
+        armor_uid = self.inv_view.selected_backpack_item
+
+        inv_data = await self.inv_view.load_json_file(self.inv_view.inventory_path)
+        unique_bag = inv_data.get("inventory", {}).get("unique", {})
+        static_bag = inv_data.get("inventory", {}).get("static", {})
+        armor_card = unique_bag.get(armor_uid)
+
+        if not armor_card:
+            return await inter.response.send_message("Модифицируемый предмет не найден в базе данных.", ephemeral=True)
+
+        if slot in ["plate", "additional_armor"]:
+            old_uid = armor_card.get(slot)
+            if old_uid and old_uid in unique_bag:
+                unique_bag[old_uid]["holder_armor_uid"] = None
+                armor_card[slot] = None
+        
+        elif slot == "mods":
+            setup_mods = armor_card.get("setup_mods", [])
+            if setup_mods:
+                removed_mod = setup_mods.pop()
+                static_bag[removed_mod] = static_bag.get(removed_mod, 0) + 1
+                
+        elif slot == "anomaly":
+            setup_anomaly = armor_card.get("setup_anomaly_mods", [])
+            if setup_anomaly:
+                removed_anom = setup_anomaly.pop()
+                static_bag[removed_anom] = static_bag.get(removed_anom, 0) + 1
+
+        # Асинхронное сохранение изменений
+        async with aiofiles.open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(inv_data, indent=4, ensure_ascii=False))
+
+        # Перерасчет параметров персонажа
+        await sync_character_weight_and_effects(self.inv_view.folder_path)
+        await self.send_menu(inter)
 
 class ArmorInputModal(disnake.ui.Modal):
     def __init__(self, menu_view):
@@ -3968,8 +4993,8 @@ class ArmorInputModal(disnake.ui.Modal):
         
         inv_data["inventory"]["unique"][u_id][op] = raw_val
         
-        with open(self.menu_view.inv_view.inventory_path, "w", encoding="utf-8") as f:
-            json.dump(inv_data, f, indent=4, ensure_ascii=False)
+        async with aiofiles.open(self.menu_view.inv_view.inventory_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(inv_data, indent=4, ensure_ascii=False))
             
         await self.menu_view.send_menu(inter)
 
@@ -4474,14 +5499,14 @@ class ContainerStandaloneModMenu(disnake.ui.View):
         loaded_arts = c_data.setdefault("artifacts", [])
         
         info = (
-            f"🛠️ **Модификация модуля: {c_name}**\n\n"
+            f"**Модификация модуля: {c_name}**\n\n"
             f"• Базовая вместимость: `{base_slots}` отсеков\n"
             f"• Эффективная вместимость: `{len(loaded_arts)}/{effective_slots}` слотов\n"
             f"• Класс радиационной изоляции: `{effective_prot}`\n"
             f"• Установленный апгрейд: {mod_info_str}\n"
         )
         
-        embed = disnake.Embed(title="⚙️ Инженерный верстак закрытого цикла", description=info, color=disnake.Color.orange())
+        embed = disnake.Embed(title="Инженерный верстак закрытого цикла", description=info, color=disnake.Color.orange())
         
         # Кнопки взаимодействия
         btn_install = disnake.ui.Button(label="Установить улучшение", style=disnake.ButtonStyle.red, row=0)
@@ -4546,9 +5571,9 @@ class ContainerStandaloneModMenu(disnake.ui.View):
                 del inv_fresh["inventory"]["static"][chosen_mod_id]
                 
             container_fresh["installed_mod"] = chosen_mod_id
-            
-            with open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
-                json.dump(inv_fresh, f, indent=4, ensure_ascii=False)
+
+            async with aiofiles.open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(inv_fresh, indent=4, ensure_ascii=False))
                 
             await sync_character_weight_and_effects(self.inv_view.folder_path)
             await self.send_menu(i)
@@ -4580,8 +5605,9 @@ class ContainerStandaloneModMenu(disnake.ui.View):
         inv_fresh["inventory"].setdefault("static", {})[current_mod] = inv_fresh["inventory"]["static"].get(current_mod, 0) + 1
         container_fresh["installed_mod"] = None
         
-        with open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
-            json.dump(inv_fresh, f, indent=4, ensure_ascii=False)
+        
+        async with aiofiles.open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(inv_fresh, indent=4, ensure_ascii=False))
             
         await sync_character_weight_and_effects(self.inv_view.folder_path)
         await self.send_menu(inter)
@@ -4643,7 +5669,7 @@ class WeaponModificationMenu(disnake.ui.View):
         info = (
             f"**Меню модификации оружия**\n"
             f"Модифицируем: **{u_data.get('username')}**\n"
-            f"Прочность: `{u_data.get('durability', 10)}/10`\n\n"
+            f"Состояние: `{u_data.get('durability', 10)}/10`\n\n"
             f"**Текущие ТТХ с учётом модификаций:**\n"
             f"• Урон: `{format_dice_array(damage_arr)}`\n"
             f"• Отдача: `{recoil}` | Точность: `{accuracy}`\n"
@@ -4764,14 +5790,14 @@ class WeaponModificationMenu(disnake.ui.View):
         for item_id, amount in static_bag.items():
             if amount <= 0: continue
             if items_lib.get(item_id, {}).get("type") == "gun_modification":
-                options.append(disnake.SelectOption(label=f"📦 {items_lib[item_id].get('name', item_id)} ({amount} шт.)", value=f"static_{item_id}"))
+                options.append(disnake.SelectOption(label=f"{items_lib[item_id].get('name', item_id)} ({amount} шт.)", value=f"static_{item_id}"))
 
         # Поиск в уникальных
         for u_id, u_card in unique_bag.items():
             if u_id == current_wep_uid or u_id in equipped_u_ids: continue
             i_type = u_card.get("type") or items_lib.get(u_card.get("template"), {}).get("type")
             if i_type == "gun_modification":
-                options.append(disnake.SelectOption(label=f"🔺 {u_card['username'][:40]}", value=f"unique_{u_id}"))
+                options.append(disnake.SelectOption(label=f"{u_card['username'][:40]}", value=f"unique_{u_id}"))
                 
         if not options:
             btn_back = disnake.ui.Button(label="Назад на верстак", style=disnake.ButtonStyle.red)
@@ -4854,3 +5880,250 @@ class WeaponInputModal(disnake.ui.Modal):
             return await inter.response.send_message("Ошибка записи данных.", ephemeral=True)
             
         await self.menu_view.send_menu(inter)
+    
+class HelmetModificationMenu(disnake.ui.View):
+    """Инженерный верстак для модификации шлемов, противогазов и масок."""
+    def __init__(self, inventory_view):
+        super().__init__(timeout=600)
+        self.inv_view = inventory_view
+        self.selected_op = None
+
+    async def send_menu(self, inter: disnake.Interaction):
+        self.clear_items()
+        
+        inv_data = await self.inv_view.load_json_file(self.inv_view.inventory_path)
+        items_lib = await self.inv_view.load_json_file(self.inv_view.items_lib_path)
+        unique_bag = inv_data.get("inventory", {}).get("unique", {})
+        u_id = self.inv_view.selected_backpack_item
+        
+        if u_id not in unique_bag:
+            return await inter.response.send_message("Ошибка контекста предмета.", ephemeral=True)
+            
+        u_data = unique_bag[u_id]
+        template_id = u_data.get("template", u_id)
+        item_template = items_lib.get(template_id, {})
+        item_type = u_data.get("type") or item_template.get("type", "head_armor")
+        
+        # Сборка текущих ТТХ шлема/маски
+        base_armor = item_template.get("base_armor_points", 0)
+        electro = u_data.get("electro_resist", item_template.get("electro_resist", 0))
+        termo = u_data.get("termo_resist", item_template.get("termo_resist", 0))
+        chemical = u_data.get("chemical_resist", item_template.get("chemical_resist", 0))
+        radiation = u_data.get("radiation_resist", item_template.get("radiation_resist", 0))
+        psy = u_data.get("psy_resist", item_template.get("psy_resist", 0))
+        
+        # Считаем модификаторы от установленных плат/фильтров шлема
+        installed_mods = u_data.setdefault("helmet_modifications", [])
+        for mod_id in installed_mods:
+            mod_tmpl = items_lib.get(mod_id, {})
+            mod_stats = mod_tmpl.get("modificators", {})
+            
+            base_armor += mod_stats.get("armor_points", 0)
+            electro += mod_stats.get("electro_resist", 0)
+            termo += mod_stats.get("termo_resist", 0)
+            chemical += mod_stats.get("chemical_resist", 0)
+            radiation += mod_stats.get("radiation_resist", 0)
+            psy += mod_stats.get("psy_resist", 0)
+
+        readable_mods = [items_lib.get(m, {}).get('name', m) for m in installed_mods] if installed_mods else ["отсутствуют"]
+
+        info = (
+            f"**Модификация шлема/противогаза**\n"
+            f"Объект работы: **{u_data.get('username')}**\n"
+            f"Состояние: `{u_data.get('durability', 10)}/10`\n\n"
+            f"**Текущие характеристики экипировки:**\n"
+            f"• Защита головы (Броня): `{base_armor} ПБ`\n"
+            f"• Пси-защита: `+{psy}`",
+            f"• Рад-защита: `+{radiation}`\n",
+            f"• Электрозащита: `+{electro}`"
+            f"• Термозащита: `+{termo}`\n",
+            f"• Химзащита: `+{chemical}`\n\n"
+            f"• Установленные модули: *{', '.join(readable_mods)}*\n\n"
+            f"Выберите тип проводимых работ."
+        )
+        embed = disnake.Embed(title="В.Е.Р.С.Т.А.К", description=info, color=disnake.Color.red())
+        
+        options = [
+            disnake.SelectOption(label="Переименовать элемент", value="username"),
+            disnake.SelectOption(label="Изменить описание", value="userdesc"),
+            disnake.SelectOption(label="Изменить внешний вид (URL)", value="userpicture"),
+            disnake.SelectOption(label="Установить модуль/фильтр", value="install_mod"),
+            disnake.SelectOption(label="Демонтировать модуль/фильтр", value="remove_mod")
+        ]
+        
+        select = disnake.ui.Select(placeholder="Что планируете сделать?...", options=options, custom_id="player_helmet_op_select")
+        
+        async def select_cb(i: disnake.MessageInteraction):
+            self.selected_op = i.values[0]
+            await i.response.defer()
+        select.callback = select_cb
+        self.add_item(select)
+        
+        btn_action = disnake.ui.Button(label="Приступить к работе", style=disnake.ButtonStyle.red, row=1)
+        btn_back = disnake.ui.Button(label="Назад к осмотру", style=disnake.ButtonStyle.red, row=1)
+        
+        async def btn_action_cb(i: disnake.MessageInteraction):
+            if not self.selected_op:
+                return await i.response.send_message("Сначала выберите тип работ в списке!", ephemeral=True)
+                
+            if self.selected_op == "remove_mod":
+                return await self.open_installed_mods_selector(i, installed_mods, items_lib)
+                
+            if self.selected_op in ["username", "userdesc", "userpicture"]:
+                # Используем готовый класс модального окна, передав self для возврата
+                from inventory import WeaponInputModal
+                await i.response.send_modal(WeaponInputModal(self))
+            else:
+                await self.open_backpack_material_selector(i)
+            
+        async def btn_back_cb(i: disnake.MessageInteraction):
+            await self.inv_view.send_item_context_menu(i)
+            
+        btn_action.callback = btn_action_cb; btn_back.callback = btn_back_cb
+        self.add_item(btn_action); self.add_item(btn_back)
+        
+        if inter.response.is_done(): 
+            await inter.edit_original_response(content=None, embed=embed, view=self)
+        else: 
+            await inter.response.edit_message(content=None, embed=embed, view=self)
+
+    async def open_installed_mods_selector(self, inter: disnake.MessageInteraction, installed_mods: list, items_lib: dict):
+        """Выбор установленного модуля для демонтажа."""
+        self.clear_items()
+        
+        btn_cancel = disnake.ui.Button(label="Назад на верстак", style=disnake.ButtonStyle.red, row=1)
+        btn_cancel.callback = self.send_menu
+        self.add_item(btn_cancel)
+
+        if not installed_mods:
+            embed = disnake.Embed(title="Верстак: Нечего снимать", description="На этом шлеме нет установленных модификаций!", color=disnake.Color.red())
+            return await inter.response.edit_message(content=None, embed=embed, view=self)
+
+        options = []
+        for idx, template_id in enumerate(installed_mods):
+            m_name = items_lib.get(template_id, {}).get("name", template_id)
+            options.append(disnake.SelectOption(label=f"{m_name} (Слот #{idx+1})", value=str(idx)))
+
+        embed = disnake.Embed(title="Демонтаж компонентов шлема", description="Выберите модуль для извлечения:", color=disnake.Color.red())
+        demount_select = disnake.ui.Select(placeholder="Какой модуль снимаем?...", options=options[:25], row=0)
+
+        async def demount_select_cb(i: disnake.MessageInteraction):
+            target_idx = int(i.values[0])
+            inv_data_fresh = await self.inv_view.load_json_file(self.inv_view.inventory_path)
+            items_lib_fresh = await self.inv_view.load_json_file(self.inv_view.items_lib_path)
+            
+            u_id = self.inv_view.selected_backpack_item
+            fresh_helm = inv_data_fresh["inventory"]["unique"][u_id]
+            fresh_array = fresh_helm.setdefault("helmet_modifications", [])
+            
+            if target_idx >= len(fresh_array):
+                return await i.response.send_message("Ошибка синхронизации данных.", ephemeral=True)
+
+            removed_template_id = fresh_array.pop(target_idx)
+            
+            try:
+                async with aiofiles.open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(inv_data_fresh, indent=4, ensure_ascii=False))
+            except:
+                return await i.response.send_message("Ошибка записи данных.", ephemeral=True)
+
+            from inventory import add_item_to_inventory
+            await add_item_to_inventory(self.inv_view.folder_path, removed_template_id, items_lib_fresh, amount=1)
+            await sync_character_weight_and_effects(self.inv_view.folder_path)
+            await self.send_menu(i)
+
+        demount_select.callback = demount_select_cb
+        self.add_item(demount_select)
+        await inter.response.edit_message(content="Выберите модуль для демонтажа:", embed=embed, view=self)
+
+    async def open_backpack_material_selector(self, inter: disnake.MessageInteraction):
+        """Поиск доступных helmet_mod в рюкзаке с валидацией совместимости подтипов."""
+        self.clear_items()
+        inv_data = await self.inv_view.load_json_file(self.inv_view.inventory_path)
+        items_lib = await self.inv_view.load_json_file(self.inv_view.items_lib_path)
+        
+        static_bag = inv_data.get("inventory", {}).get("static", {})
+        options = []
+
+        # Поиск плат/фильтров шлемов в статических предметах рюкзака
+        for item_id, amount in static_bag.items():
+            if amount <= 0: continue
+            if items_lib.get(item_id, {}).get("type") == "helmet_mods":
+                options.append(disnake.SelectOption(label=f"{items_lib[item_id].get('name', item_id)} ({amount} шт.)", value=item_id))
+
+        btn_cancel = disnake.ui.Button(label="Назад на верстак", style=disnake.ButtonStyle.red, row=1)
+        btn_cancel.callback = self.send_menu
+        self.add_item(btn_cancel)
+
+        if not options:
+            embed = disnake.Embed(title="Верстак: Нечего устанавливать", description="В рюкзаке нет подходящих модулей или фильтров для шлема!", color=disnake.Color.red())
+            return await inter.response.edit_message(content=None, embed=embed, view=self)
+
+        embed = disnake.Embed(title="Выберите деталь из рюкзака", description="Доступные компоненты для монтажа:", color=disnake.Color.red())
+        material_select = disnake.ui.Select(placeholder="Какой модуль ставим?...", options=options[:25], row=0)
+        
+        async def material_select_cb(i: disnake.MessageInteraction):
+            await i.response.defer(ephemeral=True)
+            target_id = i.values[0] # Технический ID выбранной модификации (компонента)
+            
+            items_lib = await load_items_library()
+            inv_data_fresh = await self.inv_view.load_json_file(self.inv_view.inventory_path)
+            
+            current_helm_uid = self.inv_view.selected_backpack_item
+            helm_card = inv_data_fresh["inventory"]["unique"][current_helm_uid]
+            
+            # Данные о самом шлеме, на который ставим
+            helm_base_id = helm_card.get("item_id")
+            helm_static_data = items_lib.get(helm_base_id, {})
+            
+            # Флаги шлема (проверяем тип предмета и наличие встроенной маски)
+            is_gas_mask = helm_static_data.get("type") == "head_mask"
+            have_mask_flag = helm_static_data.get("have_mask", "no") == "yes"
+            
+            # Данные о устанавливаемой модификации
+            mod_static_data = items_lib.get(target_id, {})
+            mod_target = mod_static_data.get("mod_target", "both") # По умолчанию универсал
+
+            # --- БЛОК ОГРАНИЧЕНИЙ И ПРОВЕРОК ---
+            
+            # Правило 1: Модификации для шлемов нельзя ставить на противогазы ни при каких обстоятельствах
+            if is_gas_mask and mod_target == "head_armor":
+                embed = disnake.Embed(
+                    title="Ошибка совместимости",
+                    description=f"Модификация `{mod_static_data.get('name', target_id)}` предназначена **только для шлемов** и не может быть установлена на противогаз.",
+                    color=disnake.Color.red()
+                )
+                return await i.edit_original_response(embed=embed, view=None)
+
+            # Правило 2: Модификация для противогазов ставится на шлем, только если have_mask == "yes"
+            if not is_gas_mask and mod_target == "head_mask" and not have_mask_flag:
+                embed = disnake.Embed(
+                    title="Установка невозможна",
+                    description=f"Модификация `{mod_static_data.get('name', target_id)}` разработана **для противогазов и систем фильтрации**. Текущий шлем не оборудован встроенной маской (`have_mask: no`).",
+                    color=disnake.Color.red()
+                )
+                return await i.edit_original_response(embed=embed, view=None)
+
+            # --- ЕСЛИ ПРОВЕРКИ ПРОЙДЕНЫ: ПРОДОЛЖАЕМ УСТАНОВКУ ---
+            
+            # Установка детали в массив модификаций предмета
+            helm_card.setdefault("helmet_modifications", []).append(target_id)
+            
+            # Списываем 1 штуку из стаков расходников в рюкзаке
+            inv_data_fresh["inventory"]["static"][target_id] -= 1
+            if inv_data_fresh["inventory"]["static"][target_id] <= 0: 
+                del inv_data_fresh["inventory"]["static"][target_id]
+
+            try:
+                async with aiofiles.open(self.inv_view.inventory_path, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(inv_data_fresh, indent=4, ensure_ascii=False))
+            except Exception as e:
+                embed_err = disnake.Embed(title="Ошибка", description="Критическая ошибка записи данных на диск.", color=disnake.Color.red())
+                return await i.edit_original_response(embed=embed_err)
+                
+            await sync_character_weight_and_effects(self.inv_view.folder_path)
+            await self.send_menu(i)
+
+        material_select.callback = material_select_cb
+        self.add_item(material_select)
+        await inter.response.edit_message(content="Выберите деталь из рюкзака:", embed=embed, view=self)

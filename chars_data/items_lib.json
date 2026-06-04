@@ -62,8 +62,9 @@
     "otklik": {
         "name": "Отклик",
         "description": "Старый детектор аномальной активности — техника из прошлого, но всё ещё живая в Зоне. Простая, как лом, но иногда — единственный шанс не уйти с охоты с пустыми руками. Работает по принципу «услышал — пошёл», сигнализируя о близости артефакта звуковыми импульсами: чем чаще — тем ближе.\n\nАктивируется подъёмом крышки-антенны на лицевой панели. Надёжный, как молоток, но такой же грубый: работает только с самыми распространёнными артефактами, редкие и нестабильные для него как будто не существуют. Для опытных сталкеров — это скорее запасной вариант или трофей для обмена. Для новичков — первый шаг в мире охоты за чудесами Зоны.",
-        "type": "anomaly_detector",
+        "type": "artefact_detector",
         "stackable": "no",
+        "class": 1,
         "weight_per_item": 0.1,
         "base_price": 1000,
         "count_multiply": 1,
@@ -246,5 +247,71 @@
         "userdesc": null,
         "userpicture": null,
         "mod_auto_fire": null
+    },
+    "aramid_helmet": {
+        "name": "Арамидная прокладка",
+        "description": "Подшлемник из многослойного арамидного волокна. Защищает голову от мелких осколков, рикошетов и пистолетных пуль, а также значительно снижает заброневую травму и риск контузии при прямом попадании.",
+        "type": "helmet_mods",
+        "stackable": "yes",
+        "weight_per_item": 0.6,
+        "base_price": 8000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "modificators": {
+            "armor_points": 2
+        },
+        "is_salable": "yes",
+        "mod_target": "head_armor",
+        "issued_effect": []
+    },
+    "ballistic_helmet": {
+        "name": "Баллистический шлем",
+        "description": "Стандартный боевой шлем, широко распространённый среди охраны, патрулей и сталкеров, предпочитающих надёжность. Способен выдержать попадание пистолетной пули, а также защитить голову от ударов и обломков.  \nСовместим с большинством противогазов — при должной сноровке их можно надеть под шлем. Не обеспечивает защиты от воздействий Зоны, но как физическая броня — неплох.",
+        "type": "head_armor",
+        "stackable": "no",
+        "weight_per_item": 2.0,
+        "base_price": 4000,
+        "count_multiply": 1,
+        "picture_url": "https://media.discordapp.net/attachments/1366004682891202611/1366005193292120094/IMG_20250425_232549_503.png?ex=6a22ab79&is=6a2159f9&hm=d9098795bc94240888c00311c5ba936aa1bc0c1fd477bf38b1b1d2b116476cb6&=&format=webp&quality=lossless",
+        "deletable": "yes",
+        "base_stats": {},
+        "damage": [
+            4,
+            0
+        ],
+        "base_armor_points": 5,
+        "termo_resist": 1,
+        "psy_resist": 1,
+        "is_salable": "yes",
+        "username": null,
+        "userdesc": null,
+        "userpicture": null,
+        "issued_effect": null,
+        "electro_resist": 0,
+        "chemical_resist": 0,
+        "radiation_resist": 0,
+        "have_mask": "no"
+    },
+    "machete": {
+        "name": "Мачете",
+        "description": "Описание отсутствует",
+        "type": "melee_weapon",
+        "stackable": "no",
+        "weight_per_item": 0.6,
+        "base_price": 1000,
+        "count_multiply": 1,
+        "picture_url": null,
+        "deletable": "yes",
+        "base_stats": {},
+        "damage": [
+            4,
+            0
+        ],
+        "is_salable": "yes",
+        "username": null,
+        "userdesc": null,
+        "userpicture": null,
+        "text_feature": ""
     }
 }

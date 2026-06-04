@@ -15,12 +15,8 @@ from utils import *
 load_dotenv()
 
 intents = disnake.Intents.all()
-intents.message_content = True
 checker_list = open('check_data.txt', 'a')
 votuum_gm_list = open('data.txt', 'a')
-intents.members = True
-intents.messages = True
-intents.guilds = True
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
@@ -208,78 +204,68 @@ async def check_char(inter: disnake.ApplicationCommandInteraction, player: disna
 async def nkvd(inter: disnake.ApplicationCommandInteraction, 
     player: disnake.Member,
     char: str,
-    entity_type: str = commands.Param(
-        choices=["Черта", "Эффект"], 
-        description="Тип сущности"
-    ),
-    operation: str = commands.Param( 
-        choices=["Добавить", "Удалить"],
-        description="Что сделать с выбранной сущностью?"
-    ),
-    type: str = commands.Param(
-        choices=["Положительный тип", "Отрицательный тип"],
-        description="Укажите тип влияния сущности"
-    ),
-    target: str = commands.Param( 
-        description="Начните вводить название"
-    ),
-    ):
-
+    entity_type: str = commands.Param(choices=["Черта", "Эффект"], description="Тип сущности"),
+    operation: str = commands.Param(choices=["Добавить", "Удалить"], description="Что сделать с выбранной сущностью?"),
+    type: str = commands.Param(choices=["Положительный тип", "Отрицательный тип"], description="Укажите тип влияния сущности"),
+    target: str = commands.Param(description="Начните вводить название")
+):
+    await inter.response.defer(ephemeral=True)
     user_id = str(player.id)
     character_path = f"user_profiles/{user_id}/{char}"
     char_stats_path = f"{character_path}/char_stats.json"
-    
     file_path = "chars_data/traits_lib.json" if entity_type == "Черта" else "chars_data/effects_lib.json"
+    
+    # Асинзохронное чтение системных библиотек без блокировки потока
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            library = json.load(f)
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            library = json.loads(await f.read())
     except (FileNotFoundError, json.JSONDecodeError):
         library = {}
     
     if entity_type == "Черта":
-        if type == "Положительный тип":
-            tech_type = "positive_traits"
-        else:
-            tech_type = "negative_traits"
+        tech_type = "positive_traits" if type == "Положительный тип" else "negative_traits"
     else:
-        if type == "Положительный тип":
-            tech_type = "buffs"
-        else:
-            tech_type = "debuffs"
+        tech_type = "buffs" if type == "Положительный тип" else "debuffs"
 
     tech_name = [target]
     user_name = format_traits_list(tech_name, library)
-    
-    with open(char_stats_path, "r", encoding="utf-8") as f:
-        skills_data = json.load(f)
-    
     selected_impact = "positive" if type == "Положительный тип" else "negative"
-    
     trait_data = library.get(target)
     
     if trait_data and trait_data.get("type") != selected_impact:
-        await inter.response.send_message(
+        await inter.edit_original_response(
             embed=create_embed_bs(
                 "Ошибка выбора", 
                 f"{entity_type} `{target}` является {trait_data.get('type')}, а вы выбрали категорию {selected_impact}."
-            ), 
-            ephemeral=True
+            )
         )
         return
     
-    if operation == "Добавить":
-        skills_data[0][tech_type].append(target)
-        embed = create_embed_bs("Операция выполнена", f"{entity_type} {user_name} успешно присвоен(а) игроку {player}.")
-        await inter.response.send_message(embed=embed)
-    else:
-        skills_data[0][tech_type].remove(target)
-        embed = create_embed_bs("Операция выполнена", f"{entity_type} {user_name} успешно снят(а) у игрока {player}.")
-        await inter.response.send_message(embed=embed)
+    # Безопасная транзакция через Lock для предотвращения Race Condition
+    async with get_char_lock(character_path):
+        try:
+            async with aiofiles.open(char_stats_path, "r", encoding="utf-8") as f:
+                skills_data = json.loads(await f.read())
+        except (FileNotFoundError, json.JSONDecodeError):
+            await inter.edit_original_response(content="❌ Файл характеристик персонажа поврежден или отсутствует.")
+            return
+
+        if operation == "Добавить":
+            if target not in skills_data[0][tech_type]:
+                skills_data[0][tech_type].append(target)
+            embed = create_embed_bs("Операция выполнена", f"{entity_type} {user_name} успешно присвоен(а) игроку {player.display_name}.")
+        else:
+            if target in skills_data[0][tech_type]:
+                skills_data[0][tech_type].remove(target)
+            embed = create_embed_bs("Операция выполнена", f"{entity_type} {user_name} успешно снят(а) у игрока {player.display_name}.")
+        
+        # Асинхронная запись результатов
+        async with aiofiles.open(char_stats_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(skills_data, ensure_ascii=False, indent=4))
     
-    with open(f"{char_stats_path}", "w", encoding="utf-8") as f:
-        json.dump(skills_data, f, ensure_ascii=False, indent=4)
-    
-    await sync_character_weight_and_effects(char_stats_path)
+    # Синхронизация веса вынесена за пределы Lock, так как внутри она создает свой Lock
+    await sync_character_weight_and_effects(character_path)
+    await inter.edit_original_response(embed=embed)
 
 @nkvd.autocomplete("char")
 async def nkvd_autocomp1(inter: disnake.ApplicationCommandInteraction, string: str):
@@ -343,8 +329,8 @@ async def nkvd_autocomp2(inter: disnake.ApplicationCommandInteraction, string: s
     
     if operation == "Добавить":
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                library = json.load(f)
+            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                library = json.loads(await f.read())
         except:
             return []
         
@@ -359,10 +345,10 @@ async def nkvd_autocomp2(inter: disnake.ApplicationCommandInteraction, string: s
         return choices[:25]
     else:
         try:
-            with open(char_stats_path, "r", encoding="utf-8") as f:
-                library = json.load(f)
-            with open(file_path, "r", encoding="utf-8") as f:
-                full_library = json.load(f)
+            async with aiofiles.open(char_stats_path, "r", encoding="utf-8") as f:
+                library = json.loads(await f.read())
+            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                full_library = json.loads(await f.read())
         except:
             return []
         
@@ -406,8 +392,8 @@ async def pos_entity_check(inter: disnake.ApplicationCommandInteraction,
     file_path = "chars_data/traits_lib.json" if entity_type == "Черта" else "chars_data/effects_lib.json"
     
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            library = json.load(f)
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            library = json.loads(await f.read())
     except (FileNotFoundError, json.JSONDecodeError):
         library = {}
 
@@ -423,8 +409,8 @@ async def pos_entity_check_autocomp(inter: disnake.ApplicationCommandInteraction
     file_path = "chars_data/traits_lib.json" if entity_type == "Черта" else "chars_data/effects_lib.json"
     
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            library = json.load(f)
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            library = json.loads(await f.read())
     except:
         return []
     
@@ -447,14 +433,14 @@ async def pos_entity_check(inter: disnake.ApplicationCommandInteraction,
         description="Укажите тип влияния сущности"
     )
     ):
-    
+
     file_path = "chars_data/traits_lib.json" if entity_type == "Черта" else "chars_data/effects_lib.json"
     questions_lib_path = "chars_data/questions_lib.json"
-    with open(questions_lib_path, "r", encoding="utf-8") as f:
-        questions_lib = json.load(f)
+    async with aiofiles.open(questions_lib_path, "r", encoding="utf-8") as f:
+        questions_lib = json.loads(await f.read())
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            library = json.load(f)
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            library = json.loads(await f.read())
     except (FileNotFoundError, json.JSONDecodeError):
         library = {}   
     
@@ -486,10 +472,10 @@ async def pos_utems(inter: disnake.ApplicationCommandInteraction,
 
     # Определяем путь к файлу в зависимости от типа
     file_path = "chars_data/traits_lib.json" if entity_type == "Черта" else "chars_data/effects_lib.json"
-    
+
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            library = json.load(f)
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            library = json.loads(await f.read())
     except (FileNotFoundError, json.JSONDecodeError):
         library = {}
 
@@ -508,8 +494,8 @@ async def pos_utems(inter: disnake.ApplicationCommandInteraction,
     # РЕЖИМ 2: Удаление
     if operation == "Удалить":
         del library[target]
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(library, f, indent=4, ensure_ascii=False)
+        async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(library, indent=4, ensure_ascii=False))
         return await inter.response.send_message(f"✅ {entity_type} `{target}` удалена.")
 
     # РЕЖИМ 3: Редактирование
@@ -569,8 +555,8 @@ async def utems_autocomp(inter: disnake.ApplicationCommandInteraction, string: s
     file_path = "chars_data/traits_lib.json" if entity_type == "Черта" else "chars_data/effects_lib.json"
     
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            library = json.load(f)
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            library = json.loads(await f.read())
     except:
         return []
     
@@ -869,26 +855,27 @@ async def on_button_click(inter: disnake.MessageInteraction):
             
             action, gm_name = custom_id.split(":")
             user_vote_string = f"{inter.user.name} {gm_name}"
+
         
             # Проверяем, голосовал ли уже пользователь за данного ГМа
-            with open('data.txt', 'r', encoding='utf-8') as votuum_gm_list:
+            async with aiofiles.open('data.txt', 'r', encoding='utf-8') as votuum_gm_list:
                 votes = votuum_gm_list.readlines()
                 if any(user_vote_string in vote for vote in votes):
                     await inter.response.send_message("Вы уже проголосовали!", ephemeral=True)
                     return
         
-            # Записываем голос пользователя
+            # Запись голоса
             if action == 'agree_vote':
-                with open('data.txt', 'a', encoding='utf-8') as file:
-                    file.write(f"{user_vote_string} agree\n")
+                async with aiofiles.open('data.txt', 'a', encoding='utf-8') as f:
+                    await f.write(f"{user_vote_string} agree\n")
             elif action == 'opposite_vote':
-                with open('data.txt', 'a', encoding='utf-8') as file:
-                    file.write(f"{user_vote_string} opposite,   \n")
+                async with aiofiles.open('data.txt', 'a', encoding='utf-8') as f:
+                    await f.write(f"{user_vote_string} opposite,   \n")
         
             # Подсчитываем количество голосов "agree" и "opposite" за каждый gm_name
             agree_count = 0
             opposite_count = 0
-            with open('data.txt', 'r', encoding='utf-8') as votuum_gm_list:
+            async with aiofiles.open('data.txt', 'r', encoding='utf-8') as votuum_gm_list:
                 votes = votuum_gm_list.readlines()
                 for vote in votes:
                     if gm_name in vote:
@@ -1073,7 +1060,7 @@ async def pos_item_check(
                 f"• Снимает статусы: `{removes_str}`"
             )
     
-    # --- 2. ВЕТКА: Огнестрел, Ножи, Модификации оружия (ОБНОВЛЕНО) ---
+    # --- 2. ВЕТКА: Огнестрел, Ножи, Модификации оружия ---
     elif item_type in ["weapon", "melee_weapon", "gun_modification"]:
         stats = item_data.get("base_stats", {})
         text_feat = item_data.get("text_feature", "Отсутствует")
@@ -1110,6 +1097,7 @@ async def pos_item_check(
                 f"• Отдача: `{stats.get('recoil', 0)}` | Точность: `{stats.get('accuracy', 0)}`\n"
                 f"• Кучность: `{stats.get('grouping', 3)}` | Надежность: `{stats.get('reliability', 10)}`\n"
                 f"• Магазин: `{stats.get('max_magazine', 30)}`\n"
+                f"• Базовая прочность: `10/10`\n"
                 f"• Особое свойство: *{text_feat}*"
             )
             
@@ -1123,12 +1111,13 @@ async def pos_item_check(
             issued_names = [effects_lib.get(x, {}).get("name", x) for x in issued_effs if x]
             effs_str = ", ".join(issued_names) if issued_names else "Отсутствуют"
             
-            az_val = item_data.get("base_anomaly_resist", 0) # Читаем АЗ костюма
-            daz_val = item_data.get("base_anomaly_mods", 6)   # Читаем ДАЗ костюма
+            az_val = item_data.get("base_anomaly_resist", 0)
+            daz_val = item_data.get("base_anomaly_mods", 6)
             
             spec_info = (
                 f"**[Характеристики комбинезона]**\n"
-                f"• Класс защиты (очки): `{pts[1]} БП`\n"
+                f"• Базовая прочность: `10/10`\n"
+                f"• Класс защиты (очки брони): `{pts[0]}/{pts[1]} ПБ`\n"
                 f"• Аномальная защита (АЗ): `{az_val}`\n"
                 f"• Доступный ДАЗ (Ячейки модов): `{daz_val}`\n"
                 f"• Встроенные эффекты: `{effs_str}`\n"
@@ -1144,29 +1133,39 @@ async def pos_item_check(
                 f"• Химзащита: `{item_data.get('chemical_resist', 0)}` | Рад. защита: `{item_data.get('radiation_resist', 0)}`\n"
                 f"• Пси-защита: `{item_data.get('psy_resist', 0)}`"
             )
-            mask_info = f"• Совместим с маской: `{ 'Да' if item_data.get('have_mask', 'no') == 'no' else 'Нет' }\n" if item_type == "head_armor" else ""
+            mask_info = f"• Совместим с маской: `{'Нет' if item_data.get('have_mask', 'no') == 'no' else 'Да'}`\n" if item_type == "head_armor" else ""
             
             spec_info = (
                 f"**[Характеристики защиты головы]**\n"
-                f"• Базовая броня: `{b_armor} ПБ`\n"
+                f"• Базовая прочность: `10/10`\n"
+                f"• Базовая броня: `{b_armor}/{b_armor} ПБ`\n"
                 f"{mask_info}"
                 f"• Эффект при ношении: `{readable_eff}`\n"
                 f"**[Аномальные статы]**\n{resists}"
             )
 
     # --- 4. ВЕТКА: Бронеплиты, Модификаторы брони, Навесы ---
-    elif item_type in ["armor_plate", "add_armor", "mounted_mod", "helmet_mods", "anomal_mod"]:
-        if item_type == "anomal_mod":
+    elif item_type in ["armor_plate", "add_armor", "mounted_mod", "helmet_mods", "anomaly_mod"]:
+        text_feat = item_data.get("text_feature", "Отсутствует")
+        
+        if item_type == "anomaly_mod":
             req = item_data.get("anomaly_mod_req", 1)
             resists = item_data.get("add_resist", {})
+            
+            effs = item_data.get("issued_effect", [])
+            if isinstance(effs, str): effs = [effs]
+            effs_str = ", ".join([effects_lib.get(x, {}).get("name", x) for x in effs if x]) if effs else "Отсутствуют"
+            
             spec_info = (
-                f"**[Параметры аномального модуля]**\n"
+                f"**[Параметры АЗ-обшивки]**\n"
                 f"• Потребление ДАЗ (req): `{req}`\n\n"
                 f"**Модификаторы сопротивления:**\n"
                 f"• Мод. Электрозащиты: `{resists.get('electro_resist', 0)}`\n"
                 f"• Мод. Термозащиты: `{resists.get('termo_resist', 0)}`\n"
                 f"• Мод. Химзащиты: `{resists.get('chemical_resist', 0)}`\n"
-                f"• Мод. Радиационной защиты: `{resists.get('radiation_resist', 0)}`"
+                f"• Мод. Радиационной защиты: `{resists.get('radiation_resist', 0)}`\n\n"
+                f"• Накладываемые эффекты: `{effs_str}`\n"
+                f"• Особое свойство: *{text_feat}*"
             )
         elif item_type in ["armor_plate", "add_armor"]:
             pts = item_data.get("armor_points", [0, 0])
@@ -1176,11 +1175,17 @@ async def pos_item_check(
                 eff_str = f"• Эффект модуля: `{effects_lib.get(eff, {}).get('name', eff) if eff else 'Отсутствует'}`\n"
             spec_info = (
                 f"**[Параметры бронеэлемента]**\n"
-                f"• Очки брони (armor_points): `{pts[1]} ПБ`\n"
+                f"• Очки брони (armor_points): `{pts[0]}/{pts[1]} ПБ`\n"
                 f"{eff_str}"
+                f"• Особое свойство: *{text_feat}*"
             )
         elif item_type == "helmet_mods":
             mods = item_data.get("modificators", {})
+            
+            effs = item_data.get("issued_effect", [])
+            if isinstance(effs, str): effs = [effs]
+            effs_str = ", ".join([effects_lib.get(x, {}).get("name", x) for x in effs if x]) if effs else "Отсутствуют"
+            
             spec_info = (
                 f"**[Параметры модификатора шлема]**\n"
                 f"• Мод. ПБ шлема: `{mods.get('armor_points', 0)}`\n"
@@ -1188,7 +1193,9 @@ async def pos_item_check(
                 f"• Мод. Термозащиты: `{mods.get('termo_resist', 0)}`\n"
                 f"• Мод. Химзащиты: `{mods.get('chemical_resist', 0)}`\n"
                 f"• Мод. Радиационной защиты: `{mods.get('radiation_resist', 0)}`\n"
-                f"• Мод. Пси-защиты: `{mods.get('psy_resist', 0)}`"
+                f"• Мод. Пси-защиты: `{mods.get('psy_resist', 0)}`\n"
+                f"• Накладываемые эффекты: `{effs_str}`\n"
+                f"• Особое свойство: *{text_feat}*"
             )
         else: # mounted_mod
             mods = item_data.get("modificators", {})
@@ -1204,7 +1211,8 @@ async def pos_item_check(
                 f"• Мод. Термозащиты: `{mods.get('termo_resist', 0)}`\n"
                 f"• Мод. Химзащиты: `{mods.get('chemical_resist', 0)}`\n"
                 f"• Мод. Радиационной защиты: `{mods.get('radiation_resist', 0)}`\n"
-                f"• Накладываемые эффекты: `{effs_str}`"
+                f"• Накладываемые эффекты: `{effs_str}`\n"
+                f"• Особое свойство: *{text_feat}*"
             )
 
     # --- 5. ВЕТКА: Детекторы и Электроника ---
@@ -1348,8 +1356,8 @@ async def pos_money_rp_pay(inter: disnake.ApplicationCommandInteraction, target:
     if target.id == inter.author.id: return await inter.response.send_message("❌ Нельзя передавать деньги самому себе!", ephemeral=True)
     if amount <= 0: return await inter.response.send_message("❌ Сумма должна быть больше нуля!", ephemeral=True)
     
-    character_path = f"user_profiles/{target.id}/{char}"
-    target_character_path = f"user_profiles/{inter.author.id}/{char}"
+    character_path = f"user_profiles/{inter.author.id}/{char}"
+    target_character_path = f"user_profiles/{target.id}/{char}"
     
     if not character_path: return await inter.response.send_message("❌ У вас нет персонажей.", ephemeral=True)
     if not target_character_path: return await inter.response.send_message("❌ У вас нет активного персонажа.", ephemeral=True)
@@ -1408,7 +1416,6 @@ async def pos_money_rp_pay_autocomp(inter: disnake.ApplicationCommandInteraction
         return [c for c in character_folders if string.lower() in c.lower()][:25]
     except Exception:
         return []
-
 
 # Привязываем автокомплиты к командам валюты
 @pos_money_rp_add.autocomplete("char")
@@ -1489,10 +1496,10 @@ async def item_take_autocomplete(inter: disnake.ApplicationCommandInteraction, s
 
     try:
         # Асинхронно читать не обязательно в автокомплите, чтобы не дропать таймаут Дискорда
-        with open(inventory_path, "r", encoding="utf-8") as f:
-            inv_data = json.load(f)
-        with open(items_lib_path, "r", encoding="utf-8") as f:
-            items_lib = json.load(f)
+        async with aiofiles.open(inventory_path, "r", encoding="utf-8") as f:
+            inv_data = json.loads(await f.read())
+        async with aiofiles.open(items_lib_path, "r", encoding="utf-8") as f:
+            items_lib = json.loads(await f.read())
             
         static_bag = inv_data.get("inventory", {}).get("static", {})
         unique_bag = inv_data.get("inventory", {}).get("unique", {})
@@ -1538,7 +1545,7 @@ async def item_take_autocomplete(inter: disnake.ApplicationCommandInteraction, s
 async def items_char_autocomp(inter: disnake.ApplicationCommandInteraction, string: str):
     return await gms_char_autocomplete(inter, string)
 
-@bot.slash_command(name="pos_shop", description="Открыть универсальный магазин Зоны")
+@bot.slash_command(name="pos_shop", description="Открыть магазин")
 async def pos_shop(
     inter: disnake.ApplicationCommandInteraction,
     char: str = commands.Param(description="Выберите вашего персонажа, который совершает покупку")
